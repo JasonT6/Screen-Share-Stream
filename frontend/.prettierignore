@@ -1,0 +1,9 @@
+.next
+node_modules
+coverage
+out
+test-results
+playwright-report
+.runtime
+dist
+package-lock.json

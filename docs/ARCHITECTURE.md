@@ -1,0 +1,83 @@
+# Architecture
+
+## Product contract
+
+Private Stream is a static web app for one-way, full-source-resolution video streaming with captured source audio. Attendees use a special link, enter a shared password, and connect automatically. No host accounts, viewer accounts, waiting lobby, per-viewer approval, microphone, camera, voice chat, or media servers.
+
+## Runtime topology
+
+```text
+HTTPS static files ──► Host browser
+                  └─► Viewer browsers
+
+PeerJS Cloud ◄───────► browser rendezvous/signaling only
+Google STUN ◄───────► network-address discovery only
+
+Host browser ───────► Viewer A: encrypted screen video + captured audio
+             └─────► Viewer B: separate direct connection
+```
+
+The user operates no backend. Static file hosting, public signaling, and STUN are still required. No TURN, LiveKit, SFU, database, API routes, Docker, server tokens, or recording pipeline is used. Do not describe this as guaranteed connectivity without any infrastructure.
+
+## Stack and routes
+
+Next.js and TypeScript build a static export (`output: "export"`) into `frontend/out/`. React renders the client UI. PeerJS opens a reliable direct data channel, using its public signaling service. Native `RTCPeerConnection` handles the separately authenticated one-way media connection.
+
+- `/`: host setup and active stream controls.
+- `/#room=ps-<128-bit-random-id>`: viewer password entry and playback on the same static page.
+- Invalid fragments show an invalid-invitation state.
+
+There are no dynamic server routes. Invitations contain a room identifier only; the URL fragment is not sent in HTTP requests to the static host. The room identifier necessarily reaches the signaling service. Reloading a viewer requires the password again. Reloading the host ends the session; a new stream has a new identifier.
+
+## Connection and authentication
+
+1. The host chooses a password and invokes `getDisplayMedia` directly from a user gesture.
+2. Require both live video and audio tracks; stop all tracks and explain a missing-audio failure.
+3. Generate a 128-bit random host peer ID. Derive a non-exportable HMAC-SHA256 key from the password using PBKDF2-SHA256, 210,000 iterations, and a versioned room-specific salt.
+4. Register the ephemeral host ID with PeerJS Cloud. Only then display the invitation.
+5. The attendee enters the password. Their browser creates its own ephemeral ID and opens a reliable WebRTC data channel to the host.
+6. Exchange fresh 256-bit viewer/host nonces. The transcript includes protocol version, host ID, viewer ID, and both nonces. The viewer sends a role-specific HMAC proof; the raw password and derived key are never transmitted.
+7. The host verifies before allocating a media connection or adding any source tracks. Wrong proofs are rejected automatically.
+8. Authenticate every SDP/ICE/control message with HMAC, the transcript, sending role, and a monotonically increasing sequence. Verification covers the SDP DTLS fingerprint, prevents message substitution, and rejects replay/reflection across sessions and roles. This also authenticates the host to the viewer before accepting media signaling.
+9. The host offers send-only video/audio transceivers. The viewer answers receive-only with no local tracks. ICE candidates are queued until remote SDP is applied. The data-channel handler and outbound signing run sequentially.
+10. Media streams directly over DTLS-SRTP. Stats are local browser measurements. No application server touches media.
+
+This is a shared-secret scheme, not a PAKE or identity system. A transcript can be used for offline dictionary attacks, so enforce a strong password policy and offer random generation. Participants with the password can forward access; individual revocation and impersonation resistance between password holders are out of scope. Host passwords and key material are not persisted. Do not put them in logs or local/session storage.
+
+## Regular-use launcher
+
+The root `run.command` invokes `frontend/scripts/share.mjs` (also `npm run share`). It prepares dependencies/build only when needed, starts the static-file helper on an OS-assigned free port, and forwards that exact server through a temporary Cloudflare Quick Tunnel. It never attaches a tunnel to an arbitrary existing port. The external tunnel serves web assets only and is not a media relay or a runtime application backend. Permanent static HTTPS hosting remains supported.
+
+The launcher prints a verified public host link for manual opening in the user's browser. It has no browser process, temporary profile, or browser-exit shutdown dependency. It keeps the Mac awake while active and stops its own tunnel/file server on Ctrl+C. Closing a host tab still ends that stream, but cannot terminate the launcher. The next launch has a fresh public address; invitations must be copied from the new page. Build-state hashes, a cached pinned official tunnel binary, and a diagnostic log live in ignored `.runtime/`.
+
+The public page is checked every 15 seconds, without overlapping requests. Two consecutive failures produce a terminal warning, and recovery is reported once. Checks distinguish Cloudflare 1033 from generic HTTP/network failures and reject unexpected HTML. They stop and abort in-flight requests on shutdown. The tunnel helper handles transient reconnects; the launcher does not silently replace a URL while invitations are in use. A stopped process requires a new command, address, and invitations.
+
+## Media behavior
+
+Capture stays in a direct user gesture through `getDisplayMedia`. No automatic screen selection, current-tab preference, source filtering, or permission bypass is used. `surfaceSwitching: "exclude"` asks the browser to omit the direct tab-switch shortcut; selecting a new source requires a new picker. The website cannot invoke Apple's picker directly: the browser owns that implementation, and the project must work with the normally launched browser without special launch arguments or experimental settings. Native-picker acceptance in Edge remains unresolved. Window/screen native-picker behavior must be checked manually; browser tab selection remains browser-owned. Canceling the picker is final and never triggers a capture fallback.
+
+`lib/media.ts` requests 30/60 fps and source dimensions without a width/height cap. Video uses `contentHint=detail`, no requested downscaling, `maintain-resolution`, and a 40 Mbps ceiling per viewer. Audio uses `contentHint=music`, disables voice processing during capture, and requests a 192 kbps sender ceiling. Unsupported sender tuning falls back to browser defaults.
+
+Quality is bounded by capture support, source size, hardware encoding, bandwidth, and WebRTC congestion control. No lossless, fixed resolution, or fixed frame-rate guarantee is made. Host upload/encoding cost grows with viewer count.
+
+Both data and media connections explicitly use STUN-only ICE configuration. No default TURN configuration may leak in through a library. Direct connections can fail across restrictive NAT/firewalls; the UI times out with network guidance. The host attempts one media ICE restart after failure. Established streams survive signaling-only disconnection; the host attempts signaling reconnection so new viewers can join.
+
+## Lifecycle and UI
+
+The host can start, copy the invitation, see the password, inspect viewer count and delivered stats, and end the stream. Ending immediately stops capture and media, sends an authenticated end message where possible, then closes connections. Source video or audio ending also ends the stream. Browser crashes/tab closure may produce a disconnect message instead of the graceful end message.
+
+Viewers can enter a password, retry, cancel, leave, control playback volume, and fullscreen. The native video element plays both remote tracks. Autoplay rejection surfaces an explicit sound/play button. The host preview remains muted. No attendee media permissions are requested.
+
+Async startup uses cancellation generations so a canceled/unmounted screen cannot retain a late connection or capture. Connections, tracks, timeouts, polling, and listeners are cleaned up on exit. Authentication and media have bounded connection timeouts. The host limits concurrent unauthenticated handshakes to bound resource use; it does not enforce a room capacity goal.
+
+## Source map
+
+- `frontend/components/StreamApp.tsx`: host/viewer flow, player, stats, cancellation.
+- `frontend/lib/stream-session.ts`: rendezvous, authenticated transport, media negotiation, lifecycle.
+- `frontend/lib/protocol.ts`: validation, key derivation, proofs, signed envelopes.
+- `frontend/lib/media.ts`: capture policy, STUN configuration, sender hints, stats.
+- `frontend/tests/`: protocol tests and real browser media tests.
+- `frontend/scripts/serve.mjs`: reusable static-file server and local preview command.
+- `frontend/scripts/share.mjs`: regular-use launcher, build cache, tunnel, and lifecycle.
+- `frontend/scripts/tunnel-health.mjs`: public page readiness and outage/recovery monitoring.
+- `run.command`: executable entry point for Terminal or Finder.
