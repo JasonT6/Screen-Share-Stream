@@ -36,19 +36,19 @@ Unit tests verify room/password validation, challenge binding, wrong-password fa
 ## Host capture on a real device
 
 - Open the published HTTPS site in desktop Chrome/Edge.
-- Enter a short password: starting should be blocked. Generate a password or enter a long phrase.
+- Enter a username and a one-character password: starting should succeed. Empty or whitespace-only names/passwords must be rejected.
 - Cancel the screen picker: a helpful error appears and no stream remains active.
 - Share a browser tab with audio enabled: live preview appears, is muted, and shows source dimensions.
 - Select a source without an audio track: sharing stops and the app explains how to enable audio.
 - Test window/full-screen audio on each supported OS/browser; unsupported combinations must not claim success.
 - Test both 30 and 60 fps selections with source content in motion. Inspect delivered stats rather than assuming the requested frame rate.
 - Test a 1440p/4K source: verify actual received dimensions, readability, and motion at available bandwidth.
-- Use the browser's Stop sharing button and verify the session ends. Ended audio capture should end the stream too.
+- Use the browser's Stop sharing button and verify only that publication ends. Ended audio capture should stop that publication too; the session remains open.
 
 ## Invitation and password
 
 - Invitation uses the deployed HTTPS origin, contains a random room ID in its fragment, and contains no password.
-- Open in a separate browser/profile: only a password is required. No account, name form, lobby, or approval.
+- Open in a separate browser/profile: a username and password are required. No account, lobby, or approval.
 - Incorrect password shows an error and receives no media; correct password automatically starts connecting.
 - Check generated passwords can be shown/hidden and copied manually; the invitation copy button copies only the URL.
 - Reload the invitation: prompt for the password again. No password or key should be in browser storage.
@@ -61,7 +61,10 @@ Unit tests verify room/password validation, challenge binding, wrong-password fa
 - If autoplay is blocked, use Play with sound; playback should start with audio.
 - Confirm volume/fullscreen work on desktop and mobile viewers.
 - Confirm neither host nor viewer requests microphone or camera access.
-- Join with two attendees; both receive media independently.
+- Join with two named attendees; both receive media independently.
+- Have both attendees publish simultaneously. Everyone, including the host, can select either attendee’s stream and receive its video/audio. Only the selected stream plays sound; selecting your own stream is muted.
+- Stop and restart a publication; reuse the same session invitation and confirm the participant list updates for everyone.
+- Leave while publishing, end source audio, or cancel a delayed screen picker; all affected tracks and connections must close. Other participants keep streaming until the host ends the session.
 - Leave/rejoin, reload a viewer, and briefly interrupt the network; verify appropriate status/retry behavior.
 - End the stream: all tracks stop, viewers lose playback, and the graceful ended state appears when signaling is available.
 - Close/crash the host tab: attendees eventually see disconnection; stale invitations cannot join the next stream.

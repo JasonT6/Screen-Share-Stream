@@ -2,7 +2,7 @@
 
 ## Product contract
 
-Private Stream is a static web app for one-way, full-source-resolution video streaming with captured source audio. Attendees use a special link, enter a shared password, and connect automatically. No host accounts, viewer accounts, waiting lobby, per-viewer approval, microphone, camera, voice chat, or media servers.
+Private Stream is a static web app for multi-participant, full-source-resolution screen streaming with captured source audio. Attendees use a special link, enter a username and shared password, and connect automatically. No host accounts, viewer accounts, waiting lobby, per-viewer approval, microphone, camera, voice chat, or media servers.
 
 ## Runtime topology
 
@@ -13,8 +13,9 @@ HTTPS static files ──► Host browser
 PeerJS Cloud ◄───────► browser rendezvous/signaling only
 Google STUN ◄───────► network-address discovery only
 
-Host browser ───────► Viewer A: encrypted screen video + captured audio
-             └─────► Viewer B: separate direct connection
+Host browser ◄─────► Attendee A ◄─────► Attendee B
+     └───────────────────────────────────┘
+Each publisher sends separate direct screen/audio connections to all others.
 ```
 
 The user operates no backend. Static file hosting, public signaling, and STUN are still required. No TURN, LiveKit, SFU, database, API routes, Docker, server tokens, or recording pipeline is used. Do not describe this as guaranteed connectivity without any infrastructure.
@@ -24,25 +25,26 @@ The user operates no backend. Static file hosting, public signaling, and STUN ar
 Next.js and TypeScript build a static export (`output: "export"`) into `frontend/out/`. React renders the client UI. PeerJS opens a reliable direct data channel, using its public signaling service. Native `RTCPeerConnection` handles the separately authenticated one-way media connection.
 
 - `/`: host setup and active stream controls.
-- `/#room=ps-<128-bit-random-id>`: viewer password entry and playback on the same static page.
+- `/#room=ps-<128-bit-random-id>`: attendee username/password entry, publishing, and playback on the same static page.
 - Invalid fragments show an invalid-invitation state.
 
 There are no dynamic server routes. Invitations contain a room identifier only; the URL fragment is not sent in HTTP requests to the static host. The room identifier necessarily reaches the signaling service. Reloading a viewer requires the password again. Reloading the host ends the session; a new stream has a new identifier.
 
 ## Connection and authentication
 
-1. The host chooses a password and invokes `getDisplayMedia` directly from a user gesture.
+1. The host chooses a username and any nonblank password and invokes `getDisplayMedia` directly from a user gesture.
 2. Require both live video and audio tracks; stop all tracks and explain a missing-audio failure.
 3. Generate a 128-bit random host peer ID. Derive a non-exportable HMAC-SHA256 key from the password using PBKDF2-SHA256, 210,000 iterations, and a versioned room-specific salt.
 4. Register the ephemeral host ID with PeerJS Cloud. Only then display the invitation.
-5. The attendee enters the password. Their browser creates its own ephemeral ID and opens a reliable WebRTC data channel to the host.
+5. The attendee enters a username and password. Their browser creates its own ephemeral ID and opens a reliable WebRTC data channel to the host.
 6. Exchange fresh 256-bit viewer/host nonces. The transcript includes protocol version, host ID, viewer ID, and both nonces. The viewer sends a role-specific HMAC proof; the raw password and derived key are never transmitted.
 7. The host verifies before allocating a media connection or adding any source tracks. Wrong proofs are rejected automatically.
 8. Authenticate every SDP/ICE/control message with HMAC, the transcript, sending role, and a monotonically increasing sequence. Verification covers the SDP DTLS fingerprint, prevents message substitution, and rejects replay/reflection across sessions and roles. This also authenticates the host to the viewer before accepting media signaling.
-9. The host offers send-only video/audio transceivers. The viewer answers receive-only with no local tracks. ICE candidates are queued until remote SDP is applied. The data-channel handler and outbound signing run sequentially.
-10. Media streams directly over DTLS-SRTP. Stats are local browser measurements. No application server touches media.
+9. After proof verification, the attendee sends a signed username profile. The host distributes a signed roster with participant IDs, display names, and active publication IDs. Only authenticated members may announce publications or route media signaling. The host binds forwarded sender IDs to their authenticated transport and validates publisher/target membership.
+10. Every publisher offers send-only video/audio transceivers to each other attendee. Receivers answer receive-only on each link. ICE candidates are queued until remote SDP is applied. The data-channel handler and outbound signing run sequentially. A fresh publication ID on each restart prevents stale signaling from reviving stopped streams. The host forwards signaling only, never media.
+11. Media streams directly over DTLS-SRTP. Stats are local browser measurements. No application server touches media.
 
-This is a shared-secret scheme, not a PAKE or identity system. A transcript can be used for offline dictionary attacks, so enforce a strong password policy and offer random generation. Participants with the password can forward access; individual revocation and impersonation resistance between password holders are out of scope. Host passwords and key material are not persisted. Do not put them in logs or local/session storage.
+This is a shared-secret scheme, not a PAKE or identity system. A transcript can be used for offline dictionary attacks, so recommend a strong password and offer optional random generation. Any nonblank password is accepted; no minimum length or complexity is enforced. Usernames are display names, are trimmed and limited to 40 characters, may be duplicated, and are not verified identities. Participants with the password can forward access; individual revocation and impersonation resistance between password holders are out of scope. Host passwords and key material are not persisted. Do not put them in logs or local/session storage.
 
 ## Regular-use launcher
 
@@ -58,15 +60,15 @@ Capture stays in a direct user gesture through `getDisplayMedia`. No automatic s
 
 `lib/media.ts` requests 30/60 fps and source dimensions without a width/height cap. Video uses `contentHint=detail`, no requested downscaling, `maintain-resolution`, and a 40 Mbps ceiling per viewer. Audio uses `contentHint=music`, disables voice processing during capture, and requests a 192 kbps sender ceiling. Unsupported sender tuning falls back to browser defaults.
 
-Quality is bounded by capture support, source size, hardware encoding, bandwidth, and WebRTC congestion control. No lossless, fixed resolution, or fixed frame-rate guarantee is made. Host upload/encoding cost grows with viewer count.
+Quality is bounded by capture support, source size, hardware encoding, bandwidth, and WebRTC congestion control. No lossless, fixed resolution, or fixed frame-rate guarantee is made. Each publisher’s upload/encoding cost grows with participant count. All publications are received for immediate selection; only the selected stream is attached to a player and produces audio.
 
-Both data and media connections explicitly use STUN-only ICE configuration. No default TURN configuration may leak in through a library. Direct connections can fail across restrictive NAT/firewalls; the UI times out with network guidance. The host attempts one media ICE restart after failure. Established streams survive signaling-only disconnection; the host attempts signaling reconnection so new viewers can join.
+Both data and media connections explicitly use STUN-only ICE configuration. No default TURN configuration may leak in through a library. Direct connections can fail across restrictive NAT/firewalls; the UI times out with network guidance. Each publisher attempts one media ICE restart after failure. Established streams survive signaling-only disconnection; the host attempts signaling reconnection so new viewers can join.
 
 ## Lifecycle and UI
 
-The host can start, copy the invitation, see the password, inspect viewer count and delivered stats, and end the stream. Ending immediately stops capture and media, sends an authenticated end message where possible, then closes connections. Source video or audio ending also ends the stream. Browser crashes/tab closure may produce a disconnect message instead of the graceful end message.
+The host starts a session, copies the invitation, sees named participants, selects any active stream, and ends the session. Every attendee can start, stop, and restart screen sharing without leaving. Browser Stop sharing or ended source audio stops only that publication; the invitation and other streams remain active. Explicit host End stream or host departure ends the session and stops all participant captures.
 
-Viewers can enter a password, retry, cancel, leave, control playback volume, and fullscreen. The native video element plays both remote tracks. Autoplay rejection surfaces an explicit sound/play button. The host preview remains muted. No attendee media permissions are requested.
+The player defaults to the first active stream and falls back when the selected publisher stops or leaves. Participant buttons show usernames, live/viewing state, and a muted own preview. Viewers can retry authentication, cancel, leave, control playback volume, and fullscreen. Autoplay rejection surfaces an explicit sound/play button. No microphone or camera access is requested; screen capture occurs only after the participant clicks Share.
 
 Async startup uses cancellation generations so a canceled/unmounted screen cannot retain a late connection or capture. Connections, tracks, timeouts, polling, and listeners are cleaned up on exit. Authentication and media have bounded connection timeouts. The host limits concurrent unauthenticated handshakes to bound resource use; it does not enforce a room capacity goal.
 

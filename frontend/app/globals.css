@@ -670,3 +670,43 @@ footer {
     transition: none !important;
   }
 }
+
+.participant-stream {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.participant-stream[aria-pressed="true"] {
+  border-color: #637b43;
+  background: #2e3925;
+}
+.participant-stream:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.participant-name {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.participant-stream .avatar {
+  flex-shrink: 0;
+}
+.participant-stream small {
+  white-space: nowrap;
+}
+.viewer-list li {
+  padding: 3px 0;
+}
+.status-pill {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

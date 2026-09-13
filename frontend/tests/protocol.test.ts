@@ -5,6 +5,8 @@ import {
   createRoomId,
   deriveRoomKey,
   passwordError,
+  usernameError,
+  isSignal,
   randomHex,
   ROOM_PATTERN,
   sign,
@@ -17,7 +19,10 @@ test("unguessable room IDs and nonces have the expected entropy and format", () 
   assert.equal(rooms.size, 100);
   for (const room of rooms) assert.match(room, ROOM_PATTERN);
   assert.equal(randomHex().length, 64);
-  assert.ok(passwordError("short"));
+  assert.equal(passwordError("a"), null);
+  assert.equal(passwordError("short"), null);
+  assert.ok(passwordError(""));
+  assert.equal(passwordError("x".repeat(300)), null);
   assert.ok(passwordError("            "));
   assert.equal(passwordError("correct horse battery staple"), null);
 });
@@ -71,4 +76,67 @@ test("SDP and ICE messages are authenticated, ordered, role-bound and not replay
     new SignedChannel(key, "other-session", "viewer").unpack(offer)
   );
   await assert.rejects(new SignedChannel(key, "session", "host").unpack(offer));
+});
+
+test("usernames and participant control messages are validated", () => {
+  assert.ok(usernameError("   "));
+  assert.ok(usernameError("x".repeat(41)));
+  assert.equal(usernameError("  Alice  "), null);
+  const id = createRoomId();
+  const participant = { id, username: "Alice", streamId: randomHex() };
+  assert.ok(isSignal({ type: "roster", participants: [participant] }));
+  assert.equal(
+    isSignal({ type: "roster", participants: [participant, participant] }),
+    false
+  );
+  assert.equal(isSignal({ type: "profile", username: " " }), false);
+  assert.equal(isSignal({ type: "publish", streamId: "invalid" }), false);
+  assert.equal(
+    isSignal({
+      type: "media",
+      from: id,
+      to: id,
+      publisher: id,
+      streamId: randomHex(),
+      signal: { type: "ended" }
+    }),
+    false
+  );
+});
+
+test("rosters, usernames, and routed media cannot be altered or replayed", async () => {
+  const key = await deriveRoomKey("a", createRoomId());
+  const host = new SignedChannel(key, "room", "host");
+  const viewer = new SignedChannel(key, "room", "viewer");
+  const roster = await host.pack({
+    type: "roster",
+    participants: [{ id: createRoomId(), username: "Alice", streamId: null }]
+  });
+  await assert.rejects(
+    viewer.unpack({ ...roster, body: roster.body.replace("Alice", "Mallory") })
+  );
+  assert.equal((await viewer.unpack(roster)).type, "roster");
+  await assert.rejects(viewer.unpack(roster));
+  const profile = await viewer.pack({ type: "profile", username: "Bob" });
+  await assert.rejects(
+    host.unpack({ ...profile, body: profile.body.replace("Bob", "Mallory") })
+  );
+  assert.equal((await host.unpack(profile)).type, "profile");
+  const from = createRoomId();
+  const to = `viewer-${randomHex(16)}`;
+  const media = await viewer.pack({
+    type: "media",
+    from,
+    to,
+    publisher: from,
+    streamId: randomHex(),
+    signal: { type: "candidate", candidate: { candidate: "candidate:1" } }
+  });
+  await assert.rejects(
+    host.unpack({
+      ...media,
+      body: media.body.replace(to, `viewer-${randomHex(16)}`)
+    })
+  );
+  assert.equal((await host.unpack(media)).type, "media");
 });

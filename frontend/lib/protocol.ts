@@ -13,9 +13,14 @@ export function createRoomId(): string {
 }
 
 export function passwordError(password: string): string | null {
-  if (password.trim().length < 12)
-    return "Use a password or phrase with at least 12 characters.";
-  if (password.length > 256) return "Keep the password under 257 characters.";
+  if (!password.trim()) return "Enter a password.";
+  return null;
+}
+
+export function usernameError(username: string): string | null {
+  if (!username.trim()) return "Enter a username.";
+  if (username.trim().length > 40)
+    return "Keep your username to 40 characters.";
   return null;
 }
 
@@ -141,14 +146,67 @@ export class SignedChannel {
 }
 
 type Envelope = { seq: number; body: string; mac: string };
-export type Signal =
+export type MediaSignal =
   | { type: "description"; description: RTCSessionDescriptionInit }
-  | { type: "candidate"; candidate: RTCIceCandidateInit }
-  | { type: "ended" };
+  | { type: "candidate"; candidate: RTCIceCandidateInit };
 
-function isSignal(value: unknown): value is Signal {
+export type Participant = {
+  id: string;
+  username: string;
+  streamId: string | null;
+};
+export type RoutedMedia = {
+  type: "media";
+  from: string;
+  to: string;
+  publisher: string;
+  streamId: string;
+  signal: MediaSignal;
+};
+export type Signal =
+  | MediaSignal
+  | RoutedMedia
+  | { type: "ended" }
+  | { type: "profile"; username: string }
+  | { type: "publish"; streamId: string | null }
+  | { type: "roster"; participants: Participant[] };
+
+function isPeerId(value: unknown): value is string {
+  return typeof value === "string" && /^(ps|viewer)-[a-f0-9]{32}$/.test(value);
+}
+
+export function isSignal(value: unknown): value is Signal {
   if (!isRecord(value)) return false;
   if (value.type === "ended") return true;
+  if (value.type === "profile")
+    return typeof value.username === "string" && !usernameError(value.username);
+  if (value.type === "publish")
+    return value.streamId === null || isNonce(value.streamId);
+  if (value.type === "roster")
+    return (
+      Array.isArray(value.participants) &&
+      value.participants.length <= 256 &&
+      value.participants.every(
+        (p) =>
+          isRecord(p) &&
+          isPeerId(p.id) &&
+          typeof p.username === "string" &&
+          !usernameError(p.username) &&
+          (p.streamId === null || isNonce(p.streamId))
+      ) &&
+      new Set(value.participants.map((p) => p.id)).size ===
+        value.participants.length
+    );
+  if (value.type === "media")
+    return (
+      isPeerId(value.from) &&
+      isPeerId(value.to) &&
+      isPeerId(value.publisher) &&
+      isNonce(value.streamId) &&
+      isRecord(value.signal) &&
+      ["description", "candidate"].includes(String(value.signal.type)) &&
+      isSignal(value.signal)
+    );
   if (value.type === "description") {
     return (
       isRecord(value.description) &&

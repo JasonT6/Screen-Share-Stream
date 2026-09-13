@@ -2,6 +2,19 @@
 
 Requirements reset on 2026-09-11: a static browser app for direct one-way video streaming with source audio, password invitations, and immediate connection. Historical LiveKit/account/approval milestones no longer apply.
 
+## Participant streaming update — 2026-09-13
+
+The user expanded the product contract to session usernames, relaxed passwords, and screen sharing by any attendee. Earlier receive-only and one-way product milestones below are historical.
+
+- Added required session usernames (trimmed, 1–40 characters); duplicate display names are allowed and connections retain unique peer IDs.
+- Accept any nonblank password with no minimum length or complexity requirement; keep optional password generation and authenticated access.
+- Added signed profiles, membership rosters, publication announcements, and routed media signaling. The host forwards signaling while every publication sends media directly to each other participant.
+- Added participant stream selection for host and attendees, muted own preview, and audio only from the selected stream.
+- Added independent stop/restart sharing, selection fallback, and capture cleanup on departure/session end.
+- Validation: lint, TypeScript, all 10 unit tests, and formatting passed. All 10 browser tests passed with synthetic capture over real WebRTC; the two affected authentication/multi-publisher tests passed again after final UI changes. Desktop and 390px active-session screenshots were inspected. The production static build passed after clearing the cached sandbox socket failure.
+- Browser coverage includes one-character passwords, wrong-password rejection before media allocation, named rosters, three simultaneous publishers, selected-stream decoded frames/audio RTP, muted own preview, stop/restart, departure/session-end cleanup, missing audio, and canceled attendee capture.
+- Real OS picker, audible physical-device playback, and cross-network multi-publisher behavior remain manual checks.
+
 ## Implemented
 
 - Removed runtime API routes, host accounts, PostgreSQL/Prisma, LiveKit, approval lobby, and server deployment stack.

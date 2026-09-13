@@ -11,6 +11,11 @@ import {
   sign,
   SignedChannel,
   verify,
+  usernameError,
+  passwordError,
+  type Participant,
+  type RoutedMedia,
+  type MediaSignal,
   type Signal
 } from "./protocol";
 import {
@@ -69,8 +74,7 @@ async function openPeer(id: string): Promise<Peer> {
   });
 }
 
-// One media connection per viewer. Only the host offers; the viewer has no
-// capture code, no local tracks, and only recvonly transceivers.
+// Each publisher offers a separate direct, one-way media connection to each attendee.
 class MediaLink {
   readonly pc = new RTCPeerConnection(rtcConfiguration);
   private candidates: RTCIceCandidateInit[] = [];
@@ -82,7 +86,7 @@ class MediaLink {
 
   constructor(
     private source: MediaStream | null,
-    private send: (message: Signal) => Promise<void>,
+    private send: (message: MediaSignal) => Promise<void>,
     private status: (state: string) => void,
     private fail: (message: string) => void,
     receive?: (stream: MediaStream) => void
@@ -140,7 +144,7 @@ class MediaLink {
     });
   }
 
-  async handle(message: Signal) {
+  async handle(message: MediaSignal) {
     if (this.closed) return;
     if (message.type === "candidate") {
       if (this.pc.remoteDescription)
@@ -219,44 +223,231 @@ class Transport {
   }
 }
 
-export type ViewerInfo = { id: string; label: string; status: string };
-type HostEvents = {
-  viewers: (viewers: ViewerInfo[]) => void;
+export type { Participant } from "./protocol";
+export type SessionEvents = {
+  participants: (participants: Participant[]) => void;
+  stream: (id: string, stream: MediaStream | null) => void;
   notice: (message: string) => void;
+  ready: () => void;
+  ended: () => void;
+  error: (message: string) => void;
 };
 
-export class HostSession {
-  readonly roomId: string;
-  private closed = false;
-  private clients = new Map<
+// The host distributes authenticated membership and media signaling only.
+// Every publisher sends its screen/audio directly to the other participants.
+export abstract class RoomSession {
+  readonly id: string;
+  protected closed = false;
+  protected participants: Participant[] = [];
+  protected source: MediaStream | null = null;
+  protected streamId: string | null = null;
+  private links = new Map<
     string,
-    {
-      transport: Transport;
-      media?: MediaLink;
-      timer: ReturnType<typeof setTimeout>;
-      info?: ViewerInfo;
-    }
+    { media: MediaLink; publisher: string; remote: string; streamId: string }
   >();
-  private nextViewer = 1;
+
+  constructor(
+    protected peer: Peer,
+    protected events: SessionEvents
+  ) {
+    this.id = peer.id;
+    peer.on("call", (call) => call.close());
+  }
+
+  protected abstract route(message: RoutedMedia): Promise<void>;
+  protected abstract announce(): Promise<void>;
+
+  protected setRoster(participants: Participant[]) {
+    if (this.closed) return;
+    this.participants = participants;
+    for (const [key, link] of this.links) {
+      if (
+        !participants.some((p) => p.id === link.remote) ||
+        !participants.some(
+          (p) => p.id === link.publisher && p.streamId === link.streamId
+        )
+      ) {
+        link.media.close();
+        this.links.delete(key);
+        if (link.publisher !== this.id)
+          this.events.stream(link.publisher, null);
+      }
+    }
+    this.events.participants(participants);
+    if (
+      this.source &&
+      participants.some((p) => p.id === this.id && p.streamId === this.streamId)
+    ) {
+      for (const participant of participants) {
+        if (participant.id === this.id) continue;
+        const key = `${this.id}:${participant.id}`;
+        if (!this.links.has(key)) {
+          const media = this.makeLink(this.id, participant.id, this.streamId!);
+          void media.offer().catch(() => this.linkFailed(key));
+        }
+      }
+    }
+  }
+
+  private linkFailed(key: string) {
+    const link = this.links.get(key);
+    if (!link || this.closed) return;
+    link.media.close();
+    // Retain a failed entry until the publication changes, avoiding retry storms.
+    if (link.publisher !== this.id) this.events.stream(link.publisher, null);
+    this.events.notice(NETWORK_HELP);
+  }
+
+  private makeLink(publisher: string, remote: string, streamId: string) {
+    const key = `${publisher}:${remote}`;
+    const media = new MediaLink(
+      publisher === this.id ? this.source : null,
+      (signal) =>
+        this.route({
+          type: "media",
+          from: this.id,
+          to: remote,
+          publisher,
+          streamId,
+          signal
+        }),
+      () => {},
+      () => this.linkFailed(key),
+      (stream) => this.events.stream(publisher, stream)
+    );
+    this.links.set(key, { media, publisher, remote, streamId });
+    return media;
+  }
+
+  protected async receiveMedia(message: RoutedMedia) {
+    if (this.closed || message.to !== this.id || message.from === this.id)
+      return;
+    if (
+      !this.participants.some((p) => p.id === message.from) ||
+      !this.participants.some(
+        (p) => p.id === message.publisher && p.streamId === message.streamId
+      )
+    )
+      return;
+    if (message.publisher !== message.from && message.publisher !== this.id)
+      throw new Error("Invalid publisher.");
+    const key = `${message.publisher}:${message.from}`;
+    let link = this.links.get(key);
+    if (!link) {
+      if (message.publisher === this.id) return;
+      this.makeLink(message.publisher, message.from, message.streamId);
+      link = this.links.get(key)!;
+    }
+    if (link.streamId !== message.streamId) return;
+    try {
+      await link.media.handle(message.signal);
+    } catch {
+      this.linkFailed(key);
+    }
+  }
+
+  async startSharing(source: MediaStream) {
+    if (this.closed) {
+      source.getTracks().forEach((track) => track.stop());
+      throw new Error("The session has ended.");
+    }
+    if (
+      !source.getVideoTracks().some((track) => track.readyState === "live") ||
+      !source.getAudioTracks().some((track) => track.readyState === "live")
+    ) {
+      source.getTracks().forEach((track) => track.stop());
+      throw new Error(
+        "Screen or shared audio stopped. Share again with audio enabled."
+      );
+    }
+    if (this.source) await this.stopSharing();
+    this.source = source;
+    this.streamId = randomHex();
+    this.events.stream(this.id, source);
+    source.getTracks().forEach((track) =>
+      track.addEventListener(
+        "ended",
+        () => {
+          if (this.source === source) void this.stopSharing().catch(() => {});
+        },
+        { once: true }
+      )
+    );
+    try {
+      await this.announce();
+    } catch (error) {
+      source.getTracks().forEach((track) => track.stop());
+      this.source = null;
+      this.streamId = null;
+      this.events.stream(this.id, null);
+      throw error;
+    }
+  }
+
+  async stopSharing() {
+    this.source?.getTracks().forEach((track) => track.stop());
+    this.source = null;
+    this.streamId = null;
+    for (const [key, link] of this.links) {
+      if (link.publisher === this.id) {
+        link.media.close();
+        this.links.delete(key);
+      }
+    }
+    this.events.stream(this.id, null);
+    if (!this.closed) await this.announce();
+  }
+
+  async stats(publisher?: string): Promise<StreamStats | null> {
+    const link = Array.from(this.links.values()).find(
+      (link) =>
+        link.publisher === publisher &&
+        link.media.pc.connectionState === "connected"
+    );
+    return link?.media.stats() ?? null;
+  }
+
+  protected cleanup() {
+    this.closed = true;
+    this.source?.getTracks().forEach((track) => track.stop());
+    this.source = null;
+    for (const link of this.links.values()) link.media.close();
+    this.links.clear();
+    this.events.stream(this.id, null);
+    this.events.participants([]);
+  }
+  abstract close(): void;
+}
+
+type Client = {
+  transport: Transport;
+  timer: ReturnType<typeof setTimeout>;
+  info?: Participant;
+};
+
+export class HostSession extends RoomSession {
+  readonly roomId: string;
+  private clients = new Map<string, Client>();
   private reconnect?: ReturnType<typeof setTimeout>;
 
   private constructor(
-    private peer: Peer,
+    peer: Peer,
     private key: CryptoKey,
-    private source: MediaStream,
-    private events: HostEvents
+    private username: string,
+    events: SessionEvents
   ) {
+    super(peer, events);
     this.roomId = peer.id;
     peer.on("connection", (connection) => this.accept(connection));
-    peer.on("call", (call) => call.close());
     peer.on("error", (error) => {
       if (!this.closed) events.notice(errorMessage(error));
     });
     peer.on("disconnected", () => {
       if (this.closed) return;
       events.notice(
-        "Reconnecting to the connection service. Existing viewers can keep watching."
+        "Reconnecting to the connection service. Existing participants can keep streaming."
       );
+      clearTimeout(this.reconnect);
       this.reconnect = setTimeout(() => {
         if (!this.closed && !peer.destroyed && peer.disconnected)
           peer.reconnect();
@@ -269,44 +460,90 @@ export class HostSession {
 
   static async start(
     password: string,
+    username: string,
     source: MediaStream,
-    events: HostEvents
+    events: SessionEvents
   ) {
+    const issue = passwordError(password) || usernameError(username);
+    if (issue) throw new Error(issue);
     const roomId = createRoomId();
     const key = await deriveRoomKey(password, roomId);
     const peer = await openPeer(roomId);
-    return new HostSession(peer, key, source, events);
+    const session = new HostSession(peer, key, username.trim(), events);
+    try {
+      await session.startSharing(source);
+    } catch (error) {
+      session.close();
+      throw error;
+    }
+    events.ready();
+    return session;
   }
 
-  private update() {
-    this.events.viewers(
-      Array.from(this.clients.values()).flatMap((client) =>
+  protected async announce() {
+    if (this.closed) return;
+    const participants: Participant[] = [
+      { id: this.id, username: this.username, streamId: this.streamId },
+      ...Array.from(this.clients.values()).flatMap((client) =>
         client.info ? [client.info] : []
       )
-    );
+    ];
+    // Queue the roster before any media signals generated by its application.
+    const sends = Array.from(this.clients.values())
+      .filter((client) => client.info)
+      .map((client) =>
+        client.transport
+          .send({ type: "roster", participants })
+          .catch(() => this.remove(client.transport.connection.peer))
+      );
+    this.setRoster(participants);
+    await Promise.all(sends);
+  }
+
+  protected async route(message: RoutedMedia) {
+    if (this.closed) return;
+    if (
+      !this.participants.some(
+        (p) => p.id === message.publisher && p.streamId === message.streamId
+      )
+    )
+      return;
+    if (message.publisher !== message.from && message.publisher !== message.to)
+      throw new Error("Invalid media route.");
+    if (message.to === this.id) await this.receiveMedia(message);
+    else {
+      const target = this.clients.get(message.to);
+      if (target?.info)
+        await target.transport
+          .send(message)
+          .catch(() => this.remove(message.to));
+    }
+  }
+
+  private remove(id: string) {
+    const client = this.clients.get(id);
+    if (!client) return;
+    this.clients.delete(id);
+    clearTimeout(client.timer);
+    client.transport.close();
+    if (!this.closed) void this.announce();
   }
 
   private accept(connection: DataConnection) {
     if (
       this.closed ||
       this.clients.has(connection.peer) ||
+      this.clients.size >= 255 ||
+      !/^viewer-[a-f0-9]{32}$/.test(connection.peer) ||
       Array.from(this.clients.values()).filter((client) => !client.info)
         .length >= 32
     ) {
       connection.close();
       return;
     }
-    let stage: "hello" | "auth" | "ready" | "rejected" = "hello";
+    let stage: "hello" | "auth" | "profile" | "ready" | "rejected" = "hello";
     let context = "";
-    const remove = () => {
-      const client = this.clients.get(connection.peer);
-      if (!client || client.transport !== transport) return;
-      this.clients.delete(connection.peer);
-      clearTimeout(client.timer);
-      client.media?.close();
-      transport.close();
-      this.update();
-    };
+    const remove = () => this.remove(connection.peer);
     const transport = new Transport(
       connection,
       async (message) => {
@@ -331,35 +568,36 @@ export class HostSession {
           ) {
             stage = "rejected";
             connection.send({ type: "rejected" });
-            // Allow the rejection to flush; never create a media sender on failure.
             setTimeout(remove, 150);
             return;
           }
           if (transport.closed || this.closed) return;
-          stage = "ready";
           transport.channel = new SignedChannel(this.key, context, "host");
-          const client = this.clients.get(connection.peer)!;
-          clearTimeout(client.timer);
-          client.info = {
-            id: connection.peer,
-            label: `Viewer ${this.nextViewer++}`,
-            status: "Connecting"
-          };
-          client.media = new MediaLink(
-            this.source,
-            (signal) => transport.send(signal),
-            (status) => {
-              if (client.info) client.info.status = status;
-              this.update();
-            },
-            remove
-          );
-          this.update();
-          await client.media.offer();
+          stage = "profile";
         } else {
           const signal = await transport.channel!.unpack(message);
-          if (signal.type === "ended") remove();
-          else await this.clients.get(connection.peer)?.media?.handle(signal);
+          if (transport.closed || this.closed) return;
+          const client = this.clients.get(connection.peer)!;
+          if (stage === "profile") {
+            if (signal.type !== "profile")
+              throw new Error("Username required.");
+            client.info = {
+              id: connection.peer,
+              username: signal.username.trim(),
+              streamId: null
+            };
+            clearTimeout(client.timer);
+            stage = "ready";
+            await this.announce();
+          } else if (signal.type === "publish") {
+            client.info!.streamId = signal.streamId;
+            await this.announce();
+          } else if (signal.type === "media") {
+            if (signal.from !== connection.peer)
+              throw new Error("Invalid sender.");
+            await this.route(signal);
+          } else if (signal.type === "ended") remove();
+          else throw new Error("Unexpected session message.");
         }
       },
       remove
@@ -371,68 +609,58 @@ export class HostSession {
     connection.on("close", remove);
   }
 
-  async stats(): Promise<StreamStats | null> {
-    const client = Array.from(this.clients.values()).find(
-      (entry) => entry.media?.pc.connectionState === "connected"
-    );
-    return client?.media?.stats() ?? null;
-  }
-
   async end() {
     if (this.closed) return;
-    this.closed = true;
+    this.cleanup();
     clearTimeout(this.reconnect);
-    this.source.getTracks().forEach((track) => track.stop());
     const clients = Array.from(this.clients.values());
-    clients.forEach((client) => {
-      clearTimeout(client.timer);
-      client.media?.close();
-    });
+    clients.forEach((client) => clearTimeout(client.timer));
     await Promise.allSettled(
       clients
-        .filter((client) => client.transport.channel)
+        .filter((client) => client.info)
         .map((client) => client.transport.send({ type: "ended" }))
     );
     await new Promise((resolve) => setTimeout(resolve, 150));
     clients.forEach((client) => client.transport.close());
     this.clients.clear();
     this.peer.destroy();
-    this.update();
+  }
+  close() {
+    void this.end();
   }
 }
 
-type WatchEvents = {
-  status: (status: string) => void;
-  stream: (stream: MediaStream | null) => void;
-  error: (message: string) => void;
-  ended: () => void;
-};
-
-export class ViewerSession {
-  private media?: MediaLink;
+export class ViewerSession extends RoomSession {
   private transport?: Transport;
   private timer?: ReturnType<typeof setTimeout>;
-  private closed = false;
-
-  private constructor(
-    private peer: Peer,
-    private events: WatchEvents
-  ) {}
+  private ready = false;
 
   static async join(
     roomId: string,
     password: string,
-    events: WatchEvents
-  ): Promise<ViewerSession> {
+    username: string,
+    events: SessionEvents
+  ) {
     if (!ROOM_PATTERN.test(roomId))
       throw new Error(
         "This invitation is invalid. Ask the host for a new link."
       );
+    const issue = passwordError(password) || usernameError(username);
+    if (issue) throw new Error(issue);
     const key = await deriveRoomKey(password, roomId);
     const peer = await openPeer(`viewer-${randomHex(16)}`);
     const session = new ViewerSession(peer, events);
-    session.connect(roomId, key);
+    session.connect(roomId, key, username.trim());
     return session;
+  }
+
+  protected route(message: RoutedMedia) {
+    return this.transport!.send(message);
+  }
+  protected announce() {
+    if (!this.ready)
+      return Promise.reject(new Error("Join the session before sharing."));
+    return this.transport!.send({ type: "publish", streamId: this.streamId });
   }
 
   private fail(message: string) {
@@ -441,13 +669,11 @@ export class ViewerSession {
     this.events.error(message);
   }
 
-  private connect(roomId: string, key: CryptoKey) {
-    this.peer.on("call", (call) => call.close());
+  private connect(roomId: string, key: CryptoKey, username: string) {
     this.peer.on("connection", (connection) => connection.close());
     this.peer.on("error", (error) => {
-      // Signaling outages need not interrupt an already established media stream.
-      if (this.media?.pc.connectionState !== "connected")
-        this.fail(errorMessage(error));
+      if (!this.ready) this.fail(errorMessage(error));
+      else if (!this.closed) this.events.notice(errorMessage(error));
     });
     const connection = this.peer.connect(roomId, {
       reliable: true,
@@ -459,21 +685,18 @@ export class ViewerSession {
     const transport = new Transport(
       connection,
       async (message) => {
-        if (!isRecord(message)) throw new Error("Invalid stream message.");
+        if (!isRecord(message)) throw new Error("Invalid session message.");
         if (!challenged) {
           if (message.type !== "challenge" || !isNonce(message.nonce))
-            throw new Error("Invalid stream challenge.");
+            throw new Error("Invalid challenge.");
           challenged = true;
-          const context = authContext(
-            roomId,
-            this.peer.id,
-            nonce,
-            message.nonce
-          );
+          const context = authContext(roomId, this.id, nonce, message.nonce);
           transport.channel = new SignedChannel(key, context, "viewer");
           const proof = await sign(key, `${context}:join`);
-          if (!this.closed) connection.send({ type: "auth", proof });
-        } else if (message.type === "rejected" && !this.media) {
+          if (this.closed) return;
+          connection.send({ type: "auth", proof });
+          await transport.send({ type: "profile", username });
+        } else if (message.type === "rejected" && !this.ready) {
           this.fail("Incorrect password. Check with the host and try again.");
         } else {
           const signal = await transport.channel!.unpack(message);
@@ -481,52 +704,42 @@ export class ViewerSession {
           if (signal.type === "ended") {
             this.close();
             this.events.ended();
-            return;
-          }
-          if (!this.media) {
+          } else if (signal.type === "roster") {
+            if (
+              !signal.participants.some((p) => p.id === this.id) ||
+              signal.participants[0]?.id !== roomId
+            )
+              throw new Error("Invalid session membership.");
             clearTimeout(this.timer);
-            this.events.status("Connecting video and audio");
-            this.media = new MediaLink(
-              null,
-              (outgoing) => transport.send(outgoing),
-              this.events.status,
-              (error) => this.fail(error),
-              this.events.stream
-            );
-          }
-          await this.media.handle(signal);
+            this.ready = true;
+            this.setRoster(signal.participants);
+            this.events.ready();
+          } else if (signal.type === "media") await this.receiveMedia(signal);
+          else throw new Error("Unexpected session message.");
         }
       },
       () =>
         this.fail(
-          "The stream connection was interrupted or could not be authenticated. Please reconnect."
+          "The session connection was interrupted or could not be authenticated. Please reconnect."
         )
     );
     this.transport = transport;
     connection.on("open", () => {
-      if (this.closed) return;
-      this.events.status("Checking password");
-      connection.send({ type: "hello", nonce });
+      if (!this.closed) connection.send({ type: "hello", nonce });
     });
     connection.on("close", () =>
       this.fail(
-        "The host disconnected or ended the stream. Ask for the current link to reconnect."
+        "The host disconnected or ended the session. Ask for the current link to reconnect."
       )
     );
     this.timer = setTimeout(() => this.fail(NETWORK_HELP), CONNECTION_TIMEOUT);
   }
 
-  async stats(): Promise<StreamStats | null> {
-    return this.media?.stats() ?? null;
-  }
-
   close() {
     if (this.closed) return;
-    this.closed = true;
+    this.cleanup();
     clearTimeout(this.timer);
-    this.media?.close();
     this.transport?.close();
     this.peer.destroy();
-    this.events.stream(null);
   }
 }
