@@ -58,21 +58,54 @@ export async function captureDisplay(
   return stream;
 }
 
-export async function tuneSender(sender: RTCRtpSender): Promise<void> {
+export const QUALITY_PRESETS = {
+  source: {
+    label: "Source / automatic",
+    height: Infinity,
+    bitrate: 40_000_000,
+    fps: 60
+  },
+  "1080p": { label: "1080p · high", height: 1080, bitrate: 8_000_000, fps: 30 },
+  "720p": {
+    label: "720p · balanced",
+    height: 720,
+    bitrate: 3_000_000,
+    fps: 30
+  },
+  "480p": { label: "480p · low data", height: 480, bitrate: 1_000_000, fps: 24 }
+} as const;
+export type StreamQuality = keyof typeof QUALITY_PRESETS;
+export function isStreamQuality(value: unknown): value is StreamQuality {
+  return typeof value === "string" && Object.hasOwn(QUALITY_PRESETS, value);
+}
+
+export async function tuneSender(
+  sender: RTCRtpSender,
+  quality: StreamQuality = "source"
+): Promise<boolean> {
   const parameters = sender.getParameters();
-  if (!parameters.encodings?.length) return;
+  if (!parameters.encodings?.length) return false;
   if (sender.track?.kind === "video") {
+    const preset = QUALITY_PRESETS[quality];
+    const settings = sender.track.getSettings();
     parameters.degradationPreference = "maintain-resolution";
-    parameters.encodings[0].scaleResolutionDownBy = 1;
-    // A ceiling, not a guarantee or constant bitrate. WebRTC still adapts to the link.
-    parameters.encodings[0].maxBitrate = 40_000_000;
+    // Limit the short edge, preserving aspect ratio for portrait and ultrawide sources.
+    const shortEdge = Math.min(
+      settings.width ?? preset.height,
+      settings.height ?? preset.height
+    );
+    parameters.encodings[0].scaleResolutionDownBy =
+      quality === "source" ? 1 : Math.max(1, shortEdge / preset.height);
+    parameters.encodings[0].maxBitrate = preset.bitrate;
+    parameters.encodings[0].maxFramerate = preset.fps;
   } else if (sender.track?.kind === "audio") {
     parameters.encodings[0].maxBitrate = 192_000;
   }
   try {
     await sender.setParameters(parameters);
+    return true;
   } catch {
-    // Some browsers do not implement all sender hints. Native defaults remain usable.
+    return false;
   }
 }
 
@@ -82,37 +115,104 @@ export type StreamStats = {
   fps?: number;
   mbps?: number;
   audio: boolean;
+  measured?: boolean;
+  loss?: number;
+  jitterMs?: number;
+  rttMs?: number;
+  dropped?: number;
+  limitation?: "none" | "bandwidth" | "cpu" | "other";
+  state?: RTCPeerConnectionState;
 };
+type Sample = {
+  time: number;
+  bytes: number;
+  lost: number;
+  packets: number;
+  dropped: number;
+  frames: number;
+};
+export type StatsHistory = Map<string, Sample>;
 
+// Rates use consecutive samples, never lifetime counters. Missing stats stay unknown.
 export async function readStats(
   pc: RTCPeerConnection,
   sending: boolean,
-  previous: { bytes: number; time: number }
+  previous: StatsHistory
 ): Promise<StreamStats> {
   const reports = await pc.getStats();
-  const result: StreamStats = { audio: false };
+  const result: StreamStats = {
+    audio: false,
+    state: pc.connectionState,
+    measured: false
+  };
+  const finite = (value: unknown): value is number =>
+    typeof value === "number" && Number.isFinite(value);
   reports.forEach((report) => {
+    if (report.type === "transport" && report.selectedCandidatePairId) {
+      const pair = reports.get(report.selectedCandidatePairId);
+      if (finite(pair?.currentRoundTripTime))
+        result.rttMs = pair.currentRoundTripTime * 1000;
+    }
     if (
       report.type !== (sending ? "outbound-rtp" : "inbound-rtp") ||
       report.isRemote
     )
       return;
-    if (report.kind === "audio" || report.mediaType === "audio") {
-      result.audio = (sending ? report.bytesSent : report.bytesReceived) > 0;
+    const bytes = sending ? report.bytesSent : report.bytesReceived;
+    const before = previous.get(report.id);
+    const sample: Sample = {
+      time: report.timestamp,
+      bytes: finite(bytes) ? bytes : 0,
+      lost: finite(report.packetsLost) ? report.packetsLost : 0,
+      packets: (sending ? report.packetsSent : report.packetsReceived) ?? 0,
+      dropped: report.framesDropped ?? 0,
+      frames: report.framesDecoded ?? 0
+    };
+    const elapsed = before ? sample.time - before.time : 0;
+    const valid =
+      !!before &&
+      elapsed > 0 &&
+      elapsed < 10_000 &&
+      sample.bytes >= before.bytes;
+    if (report.kind === "audio")
+      result.audio = valid && sample.bytes > before.bytes;
+    if (report.kind === "video") {
+      result.width = report.frameWidth;
+      result.height = report.frameHeight;
+      result.fps = report.framesPerSecond;
+      if (valid) {
+        result.mbps = ((sample.bytes - before.bytes) * 8) / (elapsed * 1000);
+        result.measured = sample.bytes > before.bytes;
+        const lost = Math.max(0, sample.lost - before.lost);
+        const received = sample.packets - before.packets;
+        if (
+          !sending &&
+          received >= 0 &&
+          lost + received > 0 &&
+          finite(report.packetsLost)
+        )
+          result.loss = lost / (lost + received);
+        const dropped = Math.max(0, sample.dropped - before.dropped);
+        const decoded = Math.max(0, sample.frames - before.frames);
+        if (dropped + decoded > 0)
+          result.dropped = dropped / (dropped + decoded);
+      }
+      if (finite(report.jitter)) result.jitterMs = report.jitter * 1000;
+      if (
+        ["none", "bandwidth", "cpu", "other"].includes(
+          report.qualityLimitationReason
+        )
+      )
+        result.limitation = report.qualityLimitationReason;
+      if (sending && report.remoteId) {
+        const remote = reports.get(report.remoteId);
+        if (finite(remote?.fractionLost))
+          result.loss = Math.max(0, Math.min(1, remote.fractionLost));
+        if (finite(remote?.roundTripTime))
+          result.rttMs = remote.roundTripTime * 1000;
+      }
     }
-    if (report.kind !== "video" && report.mediaType !== "video") return;
-    result.width = report.frameWidth;
-    result.height = report.frameHeight;
-    result.fps = report.framesPerSecond;
-    const bytes = Number(sending ? report.bytesSent : report.bytesReceived);
-    if (previous.time && report.timestamp > previous.time)
-      result.mbps = Math.max(
-        0,
-        ((bytes - previous.bytes) * 8) /
-          ((report.timestamp - previous.time) * 1000)
-      );
-    previous.bytes = bytes;
-    previous.time = report.timestamp;
+    previous.set(report.id, sample);
   });
   return result;
 }

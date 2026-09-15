@@ -1,3 +1,10 @@
+import {
+  summarizeUpload,
+  emptyMeasurements,
+  type RemoteHealth,
+  type SenderHealth,
+  type SessionMeasurements
+} from "./connection-quality";
 import type Peer from "peerjs";
 import type { DataConnection } from "peerjs";
 import {
@@ -20,6 +27,9 @@ import {
 } from "./protocol";
 import {
   readStats,
+  QUALITY_PRESETS,
+  type StreamQuality,
+  type StatsHistory,
   rtcConfiguration,
   tuneSender,
   type StreamStats
@@ -81,7 +91,10 @@ class MediaLink {
   private timeout: ReturnType<typeof setTimeout> | undefined;
   private retries = 0;
   private closed = false;
-  private previous = { bytes: 0, time: 0 };
+  private previous: StatsHistory = new Map();
+  private requestedQuality: StreamQuality = "source";
+  private tuning = Promise.resolve();
+  remoteHealth?: RemoteHealth;
   private stream = new MediaStream();
 
   constructor(
@@ -89,6 +102,7 @@ class MediaLink {
     private send: (message: MediaSignal) => Promise<void>,
     private status: (state: string) => void,
     private fail: (message: string) => void,
+    private publishQuality: StreamQuality,
     receive?: (stream: MediaStream) => void
   ) {
     if (source) {
@@ -146,6 +160,22 @@ class MediaLink {
 
   async handle(message: MediaSignal) {
     if (this.closed) return;
+    if (message.type === "quality") {
+      if (!this.source) throw new Error("Only viewers can request quality.");
+      this.requestedQuality = message.quality;
+      await this.applyQuality();
+      return;
+    }
+    if (message.type === "health") {
+      if (this.source)
+        throw new Error("Only publishers can send upload health.");
+      this.remoteHealth = {
+        summary: message.summary,
+        limitation: message.limitation,
+        receivedAt: Date.now()
+      };
+      return;
+    }
     if (message.type === "candidate") {
       if (this.pc.remoteDescription)
         await this.pc.addIceCandidate(message.candidate);
@@ -167,11 +197,46 @@ class MediaLink {
           description: this.pc.localDescription!.toJSON()
         });
       } else {
-        await Promise.all(this.pc.getSenders().map(tuneSender));
+        await this.applyQuality();
       }
       for (const candidate of this.candidates.splice(0))
         await this.pc.addIceCandidate(candidate);
     }
+  }
+
+  setPublishQuality(quality: StreamQuality) {
+    this.publishQuality = quality;
+    return this.applyQuality();
+  }
+  requestQuality(quality: StreamQuality) {
+    return this.send({ type: "quality", quality });
+  }
+  sendHealth(
+    summary: SenderHealth,
+    limitation: "none" | "bandwidth" | "cpu" | "other"
+  ) {
+    return this.send({ type: "health", summary, limitation });
+  }
+  private applyQuality() {
+    this.tuning = this.tuning
+      .catch(() => {})
+      .then(async () => {
+        if (this.closed || !this.source || this.pc.signalingState !== "stable")
+          return;
+        const quality =
+          QUALITY_PRESETS[this.publishQuality].height <=
+          QUALITY_PRESETS[this.requestedQuality].height
+            ? this.publishQuality
+            : this.requestedQuality;
+        const results = await Promise.all(
+          this.pc.getSenders().map((sender) => tuneSender(sender, quality))
+        );
+        if (results.some((result) => !result))
+          this.status(
+            "This browser could not apply the requested stream quality. Delivery uses browser defaults."
+          );
+      });
+    return this.tuning;
   }
 
   stats() {
@@ -241,6 +306,9 @@ export abstract class RoomSession {
   protected participants: Participant[] = [];
   protected source: MediaStream | null = null;
   protected streamId: string | null = null;
+  private publishQuality: StreamQuality = "source";
+  private playbackQuality: StreamQuality = "source";
+  private measurement?: Promise<SessionMeasurements>;
   private links = new Map<
     string,
     { media: MediaLink; publisher: string; remote: string; streamId: string }
@@ -311,11 +379,16 @@ export abstract class RoomSession {
           streamId,
           signal
         }),
-      () => {},
+      (message) => {
+        if (message.startsWith("This browser")) this.events.notice(message);
+      },
       () => this.linkFailed(key),
+      this.publishQuality,
       (stream) => this.events.stream(publisher, stream)
     );
     this.links.set(key, { media, publisher, remote, streamId });
+    if (publisher !== this.id)
+      void media.requestQuality(this.playbackQuality).catch(() => {});
     return media;
   }
 
@@ -398,13 +471,73 @@ export abstract class RoomSession {
     if (!this.closed) await this.announce();
   }
 
-  async stats(publisher?: string): Promise<StreamStats | null> {
-    const link = Array.from(this.links.values()).find(
-      (link) =>
-        link.publisher === publisher &&
-        link.media.pc.connectionState === "connected"
+  async setPublishQuality(quality: StreamQuality) {
+    this.publishQuality = quality;
+    await Promise.all(
+      Array.from(this.links.values())
+        .filter((link) => link.publisher === this.id)
+        .map((link) => link.media.setPublishQuality(quality))
     );
-    return link?.media.stats() ?? null;
+  }
+
+  async setPlaybackQuality(quality: StreamQuality) {
+    this.playbackQuality = quality;
+    await Promise.all(
+      Array.from(this.links.values())
+        .filter((link) => link.publisher !== this.id)
+        .map((link) => link.media.requestQuality(quality))
+    );
+  }
+
+  measurements(): Promise<SessionMeasurements> {
+    if (this.measurement) return this.measurement;
+    this.measurement = this.collectMeasurements().finally(() => {
+      this.measurement = undefined;
+    });
+    return this.measurement;
+  }
+
+  private async collectMeasurements(): Promise<SessionMeasurements> {
+    const result = emptyMeasurements();
+    if (this.closed) return result;
+    const links = Array.from(this.links.entries());
+    const samples = await Promise.all(
+      links.map(async ([key, link]) => {
+        const stats = await link.media.stats().catch(
+          () =>
+            ({
+              audio: false,
+              state: link.media.pc.connectionState
+            }) as StreamStats
+        );
+        if (this.closed || this.links.get(key) !== link) return null;
+        if (link.publisher === this.id) result.outgoing.push(stats);
+        else {
+          result.incoming[link.publisher] = stats;
+          if (
+            link.media.remoteHealth &&
+            Date.now() - link.media.remoteHealth.receivedAt <= 10_000
+          )
+            result.senders[link.publisher] = link.media.remoteHealth;
+        }
+        return { link, stats };
+      })
+    );
+    if (this.closed) return emptyMeasurements();
+    const summary = summarizeUpload(result.outgoing);
+    await Promise.all(
+      samples.map((sample) => {
+        if (
+          sample?.link.publisher !== this.id ||
+          sample.link.media.pc.connectionState !== "connected"
+        )
+          return;
+        return sample.link.media
+          .sendHealth(summary, sample.stats.limitation ?? "other")
+          .catch(() => {});
+      })
+    );
+    return result;
   }
 
   protected cleanup() {
@@ -462,7 +595,8 @@ export class HostSession extends RoomSession {
     password: string,
     username: string,
     source: MediaStream,
-    events: SessionEvents
+    events: SessionEvents,
+    quality: StreamQuality = "source"
   ) {
     const issue = passwordError(password) || usernameError(username);
     if (issue) throw new Error(issue);
@@ -471,6 +605,7 @@ export class HostSession extends RoomSession {
     const peer = await openPeer(roomId);
     const session = new HostSession(peer, key, username.trim(), events);
     try {
+      await session.setPublishQuality(quality);
       await session.startSharing(source);
     } catch (error) {
       session.close();

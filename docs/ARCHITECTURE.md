@@ -58,7 +58,13 @@ The public page is checked every 15 seconds, without overlapping requests. Two c
 
 Capture stays in a direct user gesture through `getDisplayMedia`. No automatic screen selection, current-tab preference, source filtering, or permission bypass is used. `surfaceSwitching: "exclude"` asks the browser to omit the direct tab-switch shortcut; selecting a new source requires a new picker. The website cannot invoke Apple's picker directly: the browser owns that implementation, and the project must work with the normally launched browser without special launch arguments or experimental settings. Native-picker acceptance in Edge remains unresolved. Window/screen native-picker behavior must be checked manually; browser tab selection remains browser-owned. Canceling the picker is final and never triggers a capture fallback.
 
-`lib/media.ts` requests 30/60 fps and source dimensions without a width/height cap. Video uses `contentHint=detail`, no requested downscaling, `maintain-resolution`, and a 40 Mbps ceiling per viewer. Audio uses `contentHint=music`, disables voice processing during capture, and requests a 192 kbps sender ceiling. Unsupported sender tuning falls back to browser defaults.
+`lib/media.ts` captures source dimensions at requested 30/60 fps and uses `contentHint=detail`. `Stream quality` controls every local sender; `Playback quality` sends a signed per-viewer request to each incoming publisher. Each sender applies the lower ceiling: source (40 Mbps/60 fps), 1080p (8 Mbps/30 fps), 720p (3 Mbps/30 fps), or 480p (1 Mbps/24 fps). `scaleResolutionDownBy` limits the short edge without upscaling; `maxFramerate` and `maxBitrate` bound the encoding. Capture is retained so quality can be restored without another picker. Changes are serialized through `setParameters` and carried into new connections. Unsupported tuning surfaces a notice. Audio retains its 192 kbps ceiling and capture voice processing remains disabled.
+
+Every two seconds, an authenticated session samples all its media links without overlapping polls. Interval packet loss, throughput, frame drops, jitter, selected-path RTT, connection state, and `qualityLimitationReason` drive local diagnostics. Counter resets and sampling gaps of ten seconds or more invalidate rate measurements. A signed, publication-bound health message sends aggregate outgoing-path counts and the current path’s encoding limitation to each viewer. Remote summaries expire after ten seconds; stopping/restarting a publication clears its measurements. No speed-test traffic or network addresses are sent in health messages.
+
+Network warning thresholds are at least 3% packet loss, 50 ms jitter, 400 ms RTT, reported bandwidth limitation, or a disconnected/failed path. Multiple bandwidth-limited outgoing paths support a _likely_ upload diagnosis. Multiple troubled incoming streams plus a sender’s healthy delivery to other viewers support a _likely_ download diagnosis. A single affected path remains ambiguous. Encoding CPU pressure and at least 10% dropped frames are presented separately when network pressure is absent. These heuristics cannot isolate an ISP, distinguish all shared-path problems, or guarantee that lag is network-related. Missing measurements stay unknown; low resolution, low frame rate, or low bitrate alone never imply bad internet.
+
+The field definitions and encoding controls follow the [W3C WebRTC statistics specification](https://www.w3.org/TR/webrtc-stats/) and [WebRTC sender parameters](https://www.w3.org/TR/webrtc/#dom-rtcrtpencodingparameters).
 
 Quality is bounded by capture support, source size, hardware encoding, bandwidth, and WebRTC congestion control. No lossless, fixed resolution, or fixed frame-rate guarantee is made. Each publisher’s upload/encoding cost grows with participant count. All publications are received for immediate selection; only the selected stream is attached to a player and produces audio.
 
@@ -77,7 +83,8 @@ Async startup uses cancellation generations so a canceled/unmounted screen canno
 - `frontend/components/StreamApp.tsx`: host/viewer flow, player, stats, cancellation.
 - `frontend/lib/stream-session.ts`: rendezvous, authenticated transport, media negotiation, lifecycle.
 - `frontend/lib/protocol.ts`: validation, key derivation, proofs, signed envelopes.
-- `frontend/lib/media.ts`: capture policy, STUN configuration, sender hints, stats.
+- `frontend/lib/media.ts`: capture policy, STUN configuration, quality presets, sender controls, interval stats.
+- `frontend/lib/connection-quality.ts`: upload summaries and conservative connection attribution.
 - `frontend/tests/`: protocol tests and real browser media tests.
 - `frontend/scripts/serve.mjs`: reusable static-file server and local preview command.
 - `frontend/scripts/share.mjs`: regular-use launcher, build cache, tunnel, and lifecycle.

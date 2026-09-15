@@ -515,3 +515,74 @@ test("attendee capture failure and canceled startup preserve watching and releas
   await host.getByRole("button", { name: "End stream" }).click();
   await viewer.close();
 });
+
+test("quality changes affect real video per viewer and publisher; connection indicators update", async ({
+  browser,
+  page: host
+}, testInfo) => {
+  const invitation = await hostStream(host);
+  const alice = await browser.newPage();
+  const bob = await browser.newPage();
+  await connect(alice, invitation, password, "Alice");
+  await connect(bob, invitation, password, "Bob");
+  await receiveAudioVideo(alice);
+  await receiveAudioVideo(bob);
+  await expect(
+    host.locator(".network-status").filter({ hasText: "Your upload" })
+  ).not.toContainText("Waiting for viewers");
+  await expect(
+    alice.locator(".network-status").filter({ hasText: "Streamer’s upload" })
+  ).not.toContainText("Awaiting streamer stats");
+  await expect(
+    host.locator(".network-status").filter({ hasText: "Your upload" })
+  ).not.toContainText("Measuring");
+  await expect(
+    alice.locator(".network-status").filter({ hasText: "Your connection" })
+  ).not.toContainText("Measuring");
+  await expect(
+    alice.locator(".network-status").filter({ hasText: "Streamer’s upload" })
+  ).not.toContainText("Measuring");
+  await alice
+    .getByLabel("Playback quality", { exact: true })
+    .selectOption("480p");
+  const height = (page: Page) =>
+    page
+      .locator("video")
+      .evaluate((video: HTMLVideoElement) => video.videoHeight);
+  await expect.poll(() => height(alice)).toBe(480);
+  await expect.poll(() => height(bob)).toBe(1080);
+  await host.getByLabel("Stream quality", { exact: true }).selectOption("720p");
+  await expect.poll(() => height(bob)).toBe(720);
+  await expect.poll(() => height(alice)).toBe(480);
+  await alice
+    .getByLabel("Playback quality", { exact: true })
+    .selectOption("source");
+  await expect.poll(() => height(alice)).toBe(720);
+  await host
+    .getByLabel("Stream quality", { exact: true })
+    .selectOption("source");
+  await receiveAudioVideo(alice);
+  await receiveAudioVideo(bob);
+  await alice.getByRole("button", { name: "Share screen & audio" }).click();
+  await alice
+    .getByLabel("Stream quality", { exact: true })
+    .selectOption("480p");
+  await host.getByRole("button", { name: "Watch Alice", exact: true }).click();
+  await expect.poll(() => height(host)).toBe(480);
+  await host.screenshot({
+    path: testInfo.outputPath("quality-desktop.png"),
+    fullPage: true
+  });
+  await bob.setViewportSize({ width: 390, height: 960 });
+  await bob.locator(".network-status summary").first().click();
+  expect(
+    await bob.evaluate(() => document.documentElement.scrollWidth <= innerWidth)
+  ).toBe(true);
+  await bob.screenshot({
+    path: testInfo.outputPath("quality-mobile.png"),
+    fullPage: true
+  });
+  await host.getByRole("button", { name: "End stream" }).click();
+  await alice.close();
+  await bob.close();
+});

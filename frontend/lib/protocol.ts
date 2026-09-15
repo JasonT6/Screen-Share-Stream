@@ -1,3 +1,5 @@
+import { isStreamQuality, type StreamQuality } from "./media";
+import type { SenderHealth } from "./connection-quality";
 const encoder = new TextEncoder();
 export const ROOM_PATTERN = /^ps-[a-f0-9]{32}$/;
 const HEX_32 = /^[a-f0-9]{64}$/;
@@ -147,6 +149,12 @@ export class SignedChannel {
 
 type Envelope = { seq: number; body: string; mac: string };
 export type MediaSignal =
+  | { type: "quality"; quality: StreamQuality }
+  | {
+      type: "health";
+      summary: SenderHealth;
+      limitation: "none" | "bandwidth" | "cpu" | "other";
+    }
   | { type: "description"; description: RTCSessionDescriptionInit }
   | { type: "candidate"; candidate: RTCIceCandidateInit };
 
@@ -204,9 +212,33 @@ export function isSignal(value: unknown): value is Signal {
       isPeerId(value.publisher) &&
       isNonce(value.streamId) &&
       isRecord(value.signal) &&
-      ["description", "candidate"].includes(String(value.signal.type)) &&
+      ["description", "candidate", "quality", "health"].includes(
+        String(value.signal.type)
+      ) &&
       isSignal(value.signal)
     );
+  if (value.type === "quality") return isStreamQuality(value.quality);
+  if (value.type === "health") {
+    if (
+      !isRecord(value.summary) ||
+      !["none", "bandwidth", "cpu", "other"].includes(String(value.limitation))
+    )
+      return false;
+    const s = value.summary;
+    if (
+      ![s.peers, s.measured, s.troubled, s.bandwidth, s.cpu].every(
+        (n) =>
+          typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 255
+      )
+    )
+      return false;
+    return (
+      Number(s.measured) <= Number(s.peers) &&
+      Number(s.troubled) <= Number(s.peers) &&
+      Number(s.bandwidth) + Number(s.cpu) <= Number(s.measured) &&
+      Number(s.bandwidth) <= Number(s.troubled)
+    );
+  }
   if (value.type === "description") {
     return (
       isRecord(value.description) &&

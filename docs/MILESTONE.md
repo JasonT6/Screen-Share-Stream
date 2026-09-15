@@ -2,6 +2,14 @@
 
 Requirements reset on 2026-09-11: a static browser app for direct one-way video streaming with source audio, password invitations, and immediate connection. Historical LiveKit/account/approval milestones no longer apply.
 
+## Quality and connection diagnostics — 2026-09-13
+
+- Added live publisher and viewer quality ceilings: Source, 1080p, 720p, 480p; each viewer request is independent and respects the publisher ceiling.
+- Added authenticated per-publication quality requests and upload-health summaries, interval WebRTC measurements, and expandable connection icons for receiving, the selected streamer, and the local publisher.
+- Attribution distinguishes likely upload, likely download, uncertain path trouble, encoding pressure, and playback frame drops; unknown/stale data is not shown as a healthy internet connection.
+- Validation: lint, type checking, all 14 unit tests, all 11 browser tests, formatting, and the production static build passed. The quality/telemetry browser test passed again after final cleanup changes and verifies icons advance from measuring to live status. Desktop/mobile screenshots were inspected.
+- Browser tests verify real per-viewer resolution changes, publisher ceilings, source restoration, and attendee publishing with synthetic capture. Diagnostic cause cases use simulated metrics in unit tests. Real network shaping, ISP attribution, and physical-device capture/playback remain manual checks.
+
 ## Participant streaming update — 2026-09-13
 
 The user expanded the product contract to session usernames, relaxed passwords, and screen sharing by any attendee. Earlier receive-only and one-way product milestones below are historical.

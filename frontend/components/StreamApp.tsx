@@ -22,10 +22,15 @@ import {
   ScreenShare,
   ShieldCheck,
   Users,
+  Wifi,
+  WifiOff,
+  Activity,
   Volume2
 } from "lucide-react";
 import {
   browserError,
+  QUALITY_PRESETS,
+  type StreamQuality,
   captureDisplay,
   type FrameRate,
   type StreamStats
@@ -43,6 +48,74 @@ import {
   type SessionEvents,
   type Participant
 } from "@/lib/stream-session";
+
+import {
+  emptyMeasurements,
+  summarizeUpload,
+  uploadStatus,
+  playbackStatus,
+  unknownStatus,
+  type ConnectionStatus
+} from "@/lib/connection-quality";
+
+function QualitySelector({
+  id,
+  label,
+  value,
+  onChange,
+  disabled
+}: {
+  id: string;
+  label: string;
+  value: StreamQuality;
+  onChange: (value: StreamQuality) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="field quality-selector">
+      <label htmlFor={id}>{label}</label>
+      <select
+        id={id}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as StreamQuality)}
+      >
+        {Object.entries(QUALITY_PRESETS).map(([key, preset]) => (
+          <option key={key} value={key}>
+            {preset.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function NetworkStatus({
+  label,
+  status
+}: {
+  label: string;
+  status: ConnectionStatus;
+}) {
+  const Icon =
+    status.level === "poor"
+      ? WifiOff
+      : status.level === "unknown"
+        ? Activity
+        : Wifi;
+  return (
+    <details className={`network-status network-${status.level}`}>
+      <summary aria-label={`${label}: ${status.label}`}>
+        <Icon size={17} aria-hidden="true" />
+        <span>
+          <strong>{label}</strong>
+          <span>{status.label}</span>
+        </span>
+      </summary>
+      <p>{status.detail}</p>
+    </details>
+  );
+}
 
 function Problem({ children }: { children: React.ReactNode }) {
   return children ? (
@@ -215,6 +288,10 @@ function Session({ roomId }: { roomId: string | null }) {
   const shareAttempt = useRef(0);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [publishQuality, setPublishQuality] = useState<StreamQuality>("source");
+  const [playbackQuality, setPlaybackQuality] =
+    useState<StreamQuality>("source");
+  const [measurements, setMeasurements] = useState(emptyMeasurements);
   const [frameRate, setFrameRate] = useState<FrameRate>(60);
   const [busy, setBusy] = useState(false);
   const [sharingBusy, setSharingBusy] = useState(false);
@@ -227,7 +304,7 @@ function Session({ roomId }: { roomId: string | null }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState(false);
-  const [stats, setStats] = useState<StreamStats | null>(null);
+
   const active = participants.filter((p) => p.streamId);
   const selectedId = active.some((p) => p.id === selected)
     ? selected
@@ -236,6 +313,21 @@ function Session({ roomId }: { roomId: string | null }) {
   const stream = selectedId ? streams[selectedId] ?? null : null;
   const [ownId, setOwnId] = useState<string | null>(null);
   const ownStream = ownId ? streams[ownId] : null;
+  const stats =
+    selectedId === ownId
+      ? measurements.outgoing[0] ?? null
+      : selectedId
+        ? measurements.incoming[selectedId] ?? null
+        : null;
+  const ownHealth = uploadStatus(summarizeUpload(measurements.outgoing));
+  const remoteHealth = selectedId
+    ? measurements.senders[selectedId]
+    : undefined;
+  const receiveHealth = playbackStatus(
+    stats ?? undefined,
+    Object.values(measurements.incoming),
+    remoteHealth
+  );
 
   const leave = useCallback(() => {
     attempt.current++;
@@ -245,6 +337,7 @@ function Session({ roomId }: { roomId: string | null }) {
     session.current?.close();
     session.current = null;
     setOwnId(null);
+    setMeasurements(emptyMeasurements());
     setStreams({});
     setParticipants([]);
     setSelected(null);
@@ -276,23 +369,47 @@ function Session({ roomId }: { roomId: string | null }) {
   }, [leave]);
 
   useEffect(() => {
+    if (!ready) return;
     let disposed = false;
-    setStats(null);
+    let polling = false;
     const timer = setInterval(() => {
       const current = session.current;
-      if (current)
-        void current
-          .stats(selectedId ?? undefined)
-          .then((value) => {
-            if (!disposed && current === session.current) setStats(value);
-          })
-          .catch(() => {});
+      if (!current || polling) return;
+      polling = true;
+      void current
+        .measurements()
+        .then((value) => {
+          if (!disposed && current === session.current) setMeasurements(value);
+        })
+        .catch(() => {
+          if (!disposed) setMeasurements(emptyMeasurements());
+        })
+        .finally(() => {
+          polling = false;
+        });
     }, 2000);
     return () => {
       disposed = true;
       clearInterval(timer);
     };
-  }, [selectedId]);
+  }, [ready]);
+
+  function changePublishQuality(value: StreamQuality) {
+    setPublishQuality(value);
+    void session.current
+      ?.setPublishQuality(value)
+      .catch(() =>
+        setNotice("Stream quality could not be updated. Please try again.")
+      );
+  }
+  function changePlaybackQuality(value: StreamQuality) {
+    setPlaybackQuality(value);
+    void session.current
+      ?.setPlaybackQuality(value)
+      .catch(() =>
+        setNotice("Playback quality could not be updated. Please try again.")
+      );
+  }
 
   function eventsFor(generation: number): SessionEvents {
     const current = () => attempt.current === generation;
@@ -302,6 +419,18 @@ function Session({ roomId }: { roomId: string | null }) {
       },
       stream: (id, value) => {
         if (!current()) return;
+        const local = id === session.current?.id;
+        setMeasurements((previous) => {
+          const incoming = { ...previous.incoming };
+          const senders = { ...previous.senders };
+          delete incoming[id];
+          delete senders[id];
+          return {
+            incoming,
+            senders,
+            outgoing: local ? [] : previous.outgoing
+          };
+        });
         setStreams((previous) => {
           const next = { ...previous };
           if (value) next[id] = value;
@@ -370,7 +499,8 @@ function Session({ roomId }: { roomId: string | null }) {
           password,
           username,
           source,
-          eventsFor(generation)
+          eventsFor(generation),
+          publishQuality
         );
       }
       if (attempt.current !== generation) {
@@ -378,6 +508,12 @@ function Session({ roomId }: { roomId: string | null }) {
         return;
       }
       session.current = joined;
+      await joined.setPublishQuality(publishQuality);
+      await joined.setPlaybackQuality(playbackQuality);
+      if (attempt.current !== generation) {
+        joined.close();
+        return;
+      }
       setOwnId(joined.id);
       if (joined instanceof HostSession) {
         setReady(true);
@@ -500,6 +636,35 @@ function Session({ roomId }: { roomId: string | null }) {
             source={selectedId === ownId ? stream : null}
             stats={stats}
           />
+          {ready && selectedId && selectedId !== ownId && (
+            <div className="playback-settings">
+              <QualitySelector
+                id="playback-quality"
+                label="Playback quality"
+                value={playbackQuality}
+                onChange={changePlaybackQuality}
+              />
+              <p className="field-help">
+                Applies to streams you receive. The streamer’s quality sets the
+                upper limit.
+              </p>
+              <div className="network-row">
+                <NetworkStatus label="Your connection" status={receiveHealth} />
+                <NetworkStatus
+                  label="Streamer’s upload"
+                  status={
+                    remoteHealth
+                      ? uploadStatus(remoteHealth.summary)
+                      : unknownStatus("Awaiting streamer stats")
+                  }
+                />
+              </div>
+              <p className="field-help">
+                Connection estimates from live streams. Click an icon for
+                details.
+              </p>
+            </div>
+          )}
           <div className="stage-note">
             <Headphones size={17} />
             <span>
@@ -540,6 +705,15 @@ function Session({ roomId }: { roomId: string | null }) {
                 create={!roomId}
                 disabled={busy}
               />
+              {!roomId && (
+                <QualitySelector
+                  id="publish-quality"
+                  label="Stream quality"
+                  value={publishQuality}
+                  onChange={changePublishQuality}
+                  disabled={busy}
+                />
+              )}
               {!roomId && (
                 <div className="field">
                   <label htmlFor="frame-rate">Motion quality</label>
@@ -668,6 +842,19 @@ function Session({ roomId }: { roomId: string | null }) {
                   </li>
                 ))}
               </ul>
+              <QualitySelector
+                id="publish-quality"
+                label="Stream quality"
+                value={publishQuality}
+                onChange={changePublishQuality}
+              />
+              <p className="field-help">
+                Your outgoing screen quality. Lower settings reduce upload use
+                for every viewer.
+              </p>
+              {ownStream && (
+                <NetworkStatus label="Your upload" status={ownHealth} />
+              )}
               <Problem>{notice}</Problem>
               {ownStream ? (
                 <button

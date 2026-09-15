@@ -140,3 +140,44 @@ test("rosters, usernames, and routed media cannot be altered or replayed", async
   );
   assert.equal((await host.unpack(media)).type, "media");
 });
+
+test("quality requests and upload health validate bounds and remain authenticated", async () => {
+  assert.equal(isSignal({ type: "quality", quality: "480p" }), true);
+  assert.equal(isSignal({ type: "quality", quality: "__proto__" }), false);
+  const summary = { peers: 2, measured: 2, troubled: 1, bandwidth: 1, cpu: 0 };
+  assert.equal(
+    isSignal({ type: "health", summary, limitation: "bandwidth" }),
+    true
+  );
+  assert.equal(
+    isSignal({
+      type: "health",
+      summary: { ...summary, bandwidth: 5 },
+      limitation: "none"
+    }),
+    false
+  );
+  assert.equal(
+    isSignal({
+      type: "health",
+      summary: { ...summary, peers: Infinity },
+      limitation: "none"
+    }),
+    false
+  );
+  const key = await deriveRoomKey("a", createRoomId());
+  const host = new SignedChannel(key, "quality", "host");
+  const viewer = new SignedChannel(key, "quality", "viewer");
+  const envelope = await viewer.pack({
+    type: "media",
+    from: `viewer-${randomHex(16)}`,
+    to: createRoomId(),
+    publisher: createRoomId(),
+    streamId: randomHex(),
+    signal: { type: "quality", quality: "480p" }
+  });
+  await assert.rejects(
+    host.unpack({ ...envelope, body: envelope.body.replace("480p", "1080p") })
+  );
+  assert.equal((await host.unpack(envelope)).type, "media");
+});

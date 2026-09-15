@@ -54,6 +54,18 @@ Unit tests verify room/password validation, challenge binding, wrong-password fa
 - Reload the invitation: prompt for the password again. No password or key should be in browser storage.
 - Invalid/truncated links and offline hosts show actionable errors.
 
+## Quality and connection indicators
+
+- Before sharing, select a stream-quality preset; confirm a new viewer receives within that ceiling.
+- Change Stream quality while live; every viewer’s delivered resolution should change without restarting capture or audio.
+- Change Playback quality for one viewer; other viewers must retain their own quality. The publisher ceiling always wins over a higher viewer request.
+- Return both selectors to Source; confirm available source resolution returns. Check portrait and ultrawide aspect ratios and no upscaling of smaller sources.
+- Confirm new viewers and restarted publications inherit the relevant quality preferences.
+- While sending, Your upload shows measured delivery status, and without viewers it stays unknown.
+- Under controlled network constraints, compare streamer upload pressure across several viewers with one viewer’s download pressure across multiple publishers. Labels must say likely or cause unclear, never assign certain blame from one connection.
+- Test CPU load, disconnected streams, missing telemetry, and recovery. Stale summaries must disappear and rate measurements must recover without lifetime loss permanently flagging degradation.
+- Open icon details using touch and keyboard on a narrow screen. Do not certify attribution from synthetic fixtures alone.
+
 ## Playback and lifecycle
 
 - Verify actual moving video and audible source audio on another device.
