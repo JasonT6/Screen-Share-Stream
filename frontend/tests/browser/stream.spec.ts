@@ -586,3 +586,141 @@ test("quality changes affect real video per viewer and publisher; connection ind
   await alice.close();
   await bob.close();
 });
+
+test("advanced stream settings apply live per viewer, respect audio ceilings, and survive restart", async ({
+  browser,
+  page: host
+}, testInfo) => {
+  const invitation = await hostStream(host);
+  await host.getByText("Advanced stream settings", { exact: true }).click();
+  await host.locator("#publish-quality-priority").selectOption("motion");
+  await host.locator("#publish-quality-audio").selectOption("standard");
+  const alice = await browser.newPage();
+  const bob = await browser.newPage();
+  await connect(alice, invitation, password, "Alice");
+  await receiveAudioVideo(alice);
+  await connect(bob, invitation, password, "Bob");
+  await receiveAudioVideo(bob);
+  const settings = (page: Page) =>
+    page.evaluate(() => {
+      const { testPeers } = window as unknown as {
+        testPeers: RTCPeerConnection[];
+      };
+      return testPeers
+        .filter((pc) => pc.connectionState === "connected")
+        .flatMap((pc) => {
+          const senders = pc.getSenders();
+          const video = senders.find(
+            (sender) => sender.track?.kind === "video"
+          );
+          const audio = senders.find(
+            (sender) => sender.track?.kind === "audio"
+          );
+          return video && audio
+            ? [
+                {
+                  priority: video.getParameters().degradationPreference,
+                  audio: audio.getParameters().encodings[0].maxBitrate
+                }
+              ]
+            : [];
+        })
+        .sort((a, b) => (a.audio ?? 0) - (b.audio ?? 0));
+    });
+  await expect
+    .poll(() => settings(host))
+    .toEqual([
+      { priority: "maintain-framerate", audio: 128000 },
+      { priority: "maintain-framerate", audio: 128000 }
+    ]);
+  await alice.getByText("Advanced playback settings", { exact: true }).click();
+  await alice.locator("#playback-quality-priority").selectOption("detail");
+  await alice.locator("#playback-quality-audio").selectOption("low");
+  await expect
+    .poll(() => settings(host))
+    .toEqual([
+      { priority: "maintain-resolution", audio: 64000 },
+      { priority: "maintain-framerate", audio: 128000 }
+    ]);
+  await host.locator("#publish-quality-priority").selectOption("balanced");
+  await host.locator("#publish-quality-audio").selectOption("low");
+  await expect
+    .poll(async () =>
+      (await settings(host)).sort((a, b) =>
+        String(a.priority).localeCompare(String(b.priority))
+      )
+    )
+    .toEqual([
+      { priority: "balanced", audio: 64000 },
+      { priority: "maintain-resolution", audio: 64000 }
+    ]);
+  await host.locator("#publish-quality-audio").selectOption("high");
+  await expect
+    .poll(() => settings(host))
+    .toEqual([
+      { priority: "maintain-resolution", audio: 64000 },
+      { priority: "balanced", audio: 192000 }
+    ]);
+  await alice.locator("#playback-quality-priority").selectOption("streamer");
+  await host.getByRole("button", { name: "Stop sharing", exact: true }).click();
+  await expect(
+    alice.getByRole("button", { name: "Not sharing: Host", exact: true })
+  ).toBeDisabled();
+  await host
+    .getByRole("button", { name: "Share screen & audio", exact: true })
+    .click();
+  await receiveAudioVideo(alice);
+  await receiveAudioVideo(bob);
+  await expect
+    .poll(() => settings(host))
+    .toEqual([
+      { priority: "balanced", audio: 64000 },
+      { priority: "balanced", audio: 192000 }
+    ]);
+  // An attendee can independently configure their own outgoing stream.
+  await alice.getByText("Advanced stream settings", { exact: true }).click();
+  await alice.locator("#publish-quality-priority").selectOption("motion");
+  await alice.locator("#publish-quality-audio").selectOption("standard");
+  await alice
+    .getByRole("button", { name: "Share screen & audio", exact: true })
+    .click();
+  await host.getByRole("button", { name: "Watch Alice", exact: true }).click();
+  await receiveAudioVideo(host, true);
+  await expect
+    .poll(() => settings(alice))
+    .toEqual([
+      { priority: "maintain-framerate", audio: 128000 },
+      { priority: "maintain-framerate", audio: 128000 }
+    ]);
+  await host.getByText("Advanced playback settings", { exact: true }).click();
+  await host.locator("#playback-quality-priority").selectOption("detail");
+  await host.locator("#playback-quality-audio").selectOption("low");
+  await expect
+    .poll(() => settings(alice))
+    .toEqual([
+      { priority: "maintain-resolution", audio: 64000 },
+      { priority: "maintain-framerate", audio: 128000 }
+    ]);
+  await host.screenshot({
+    path: testInfo.outputPath("advanced-desktop.png"),
+    fullPage: true
+  });
+  await alice.setViewportSize({ width: 390, height: 960 });
+  const playback = alice
+    .locator(".advanced-settings")
+    .filter({ hasText: "Advanced playback settings" });
+  if ((await playback.getAttribute("open")) === null)
+    await playback.locator("summary").click();
+  expect(
+    await alice.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth
+    )
+  ).toBe(true);
+  await alice.screenshot({
+    path: testInfo.outputPath("advanced-mobile.png"),
+    fullPage: true
+  });
+  await host.getByRole("button", { name: "End stream", exact: true }).click();
+  await alice.close();
+  await bob.close();
+});

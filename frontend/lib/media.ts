@@ -79,16 +79,80 @@ export function isStreamQuality(value: unknown): value is StreamQuality {
   return typeof value === "string" && Object.hasOwn(QUALITY_PRESETS, value);
 }
 
+export const VIDEO_PRIORITIES = {
+  detail: {
+    label: "Quality priority · detail",
+    degradation: "maintain-resolution"
+  },
+  motion: {
+    label: "Frame rate priority · motion",
+    degradation: "maintain-framerate"
+  },
+  balanced: { label: "Balanced", degradation: "balanced" }
+} as const;
+export const AUDIO_QUALITIES = {
+  high: { label: "High · up to 192 kbps", bitrate: 192_000 },
+  standard: { label: "Standard · up to 128 kbps", bitrate: 128_000 },
+  low: { label: "Low data · up to 64 kbps", bitrate: 64_000 }
+} as const;
+export type StreamPreferences = {
+  priority: keyof typeof VIDEO_PRIORITIES | "streamer";
+  audio: keyof typeof AUDIO_QUALITIES;
+};
+export const PUBLISH_PREFERENCES: StreamPreferences = {
+  priority: "detail",
+  audio: "high"
+};
+export const PLAYBACK_PREFERENCES: StreamPreferences = {
+  priority: "streamer",
+  audio: "high"
+};
+
+export function isStreamPreferences(
+  value: unknown
+): value is StreamPreferences {
+  if (typeof value !== "object" || value === null) return false;
+  const preferences = value as Record<string, unknown>;
+  return (
+    typeof preferences.priority === "string" &&
+    (preferences.priority === "streamer" ||
+      Object.hasOwn(VIDEO_PRIORITIES, preferences.priority)) &&
+    typeof preferences.audio === "string" &&
+    Object.hasOwn(AUDIO_QUALITIES, preferences.audio)
+  );
+}
+
+export function resolvePreferences(
+  publisher: StreamPreferences,
+  viewer: StreamPreferences
+): StreamPreferences {
+  return {
+    priority:
+      viewer.priority === "streamer" ? publisher.priority : viewer.priority,
+    audio:
+      AUDIO_QUALITIES[publisher.audio].bitrate <=
+      AUDIO_QUALITIES[viewer.audio].bitrate
+        ? publisher.audio
+        : viewer.audio
+  };
+}
+
 export async function tuneSender(
   sender: RTCRtpSender,
-  quality: StreamQuality = "source"
+  quality: StreamQuality = "source",
+  preferences: StreamPreferences = PUBLISH_PREFERENCES
 ): Promise<boolean> {
   const parameters = sender.getParameters();
   if (!parameters.encodings?.length) return false;
   if (sender.track?.kind === "video") {
     const preset = QUALITY_PRESETS[quality];
     const settings = sender.track.getSettings();
-    parameters.degradationPreference = "maintain-resolution";
+    // Explicit per-sender preference overrides the shared capture's detail hint.
+    // Never mutate the shared track hint for one viewer's preference.
+    parameters.degradationPreference =
+      VIDEO_PRIORITIES[
+        preferences.priority === "streamer" ? "detail" : preferences.priority
+      ].degradation;
     // Limit the short edge, preserving aspect ratio for portrait and ultrawide sources.
     const shortEdge = Math.min(
       settings.width ?? preset.height,
@@ -99,7 +163,8 @@ export async function tuneSender(
     parameters.encodings[0].maxBitrate = preset.bitrate;
     parameters.encodings[0].maxFramerate = preset.fps;
   } else if (sender.track?.kind === "audio") {
-    parameters.encodings[0].maxBitrate = 192_000;
+    parameters.encodings[0].maxBitrate =
+      AUDIO_QUALITIES[preferences.audio].bitrate;
   }
   try {
     await sender.setParameters(parameters);

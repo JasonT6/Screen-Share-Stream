@@ -782,3 +782,26 @@ footer {
     gap: 0;
   }
 }
+
+.advanced-settings {
+  margin: 14px 0;
+  border: 1px solid #394632;
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 0;
+}
+.advanced-settings summary {
+  cursor: pointer;
+  color: #d3ddca;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.advanced-settings summary:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+.advanced-settings select {
+  min-width: 0;
+  max-width: 100%;
+}

@@ -28,6 +28,10 @@ import {
 import {
   readStats,
   QUALITY_PRESETS,
+  PUBLISH_PREFERENCES,
+  PLAYBACK_PREFERENCES,
+  resolvePreferences,
+  type StreamPreferences,
   type StreamQuality,
   type StatsHistory,
   rtcConfiguration,
@@ -93,6 +97,7 @@ class MediaLink {
   private closed = false;
   private previous: StatsHistory = new Map();
   private requestedQuality: StreamQuality = "source";
+  private requestedPreferences = PLAYBACK_PREFERENCES;
   private tuning = Promise.resolve();
   remoteHealth?: RemoteHealth;
   private stream = new MediaStream();
@@ -103,6 +108,7 @@ class MediaLink {
     private status: (state: string) => void,
     private fail: (message: string) => void,
     private publishQuality: StreamQuality,
+    private publishPreferences: StreamPreferences,
     receive?: (stream: MediaStream) => void
   ) {
     if (source) {
@@ -163,6 +169,7 @@ class MediaLink {
     if (message.type === "quality") {
       if (!this.source) throw new Error("Only viewers can request quality.");
       this.requestedQuality = message.quality;
+      this.requestedPreferences = message.preferences ?? PLAYBACK_PREFERENCES;
       await this.applyQuality();
       return;
     }
@@ -204,12 +211,13 @@ class MediaLink {
     }
   }
 
-  setPublishQuality(quality: StreamQuality) {
+  setPublishQuality(quality: StreamQuality, preferences: StreamPreferences) {
     this.publishQuality = quality;
+    this.publishPreferences = preferences;
     return this.applyQuality();
   }
-  requestQuality(quality: StreamQuality) {
-    return this.send({ type: "quality", quality });
+  requestQuality(quality: StreamQuality, preferences: StreamPreferences) {
+    return this.send({ type: "quality", quality, preferences });
   }
   sendHealth(
     summary: SenderHealth,
@@ -228,12 +236,18 @@ class MediaLink {
           QUALITY_PRESETS[this.requestedQuality].height
             ? this.publishQuality
             : this.requestedQuality;
+        const preferences = resolvePreferences(
+          this.publishPreferences,
+          this.requestedPreferences
+        );
         const results = await Promise.all(
-          this.pc.getSenders().map((sender) => tuneSender(sender, quality))
+          this.pc
+            .getSenders()
+            .map((sender) => tuneSender(sender, quality, preferences))
         );
         if (results.some((result) => !result))
           this.status(
-            "This browser could not apply the requested stream quality. Delivery uses browser defaults."
+            "This browser could not apply all requested stream settings. Some settings may remain unchanged or use browser defaults."
           );
       });
     return this.tuning;
@@ -308,6 +322,8 @@ export abstract class RoomSession {
   protected streamId: string | null = null;
   private publishQuality: StreamQuality = "source";
   private playbackQuality: StreamQuality = "source";
+  private publishPreferences = PUBLISH_PREFERENCES;
+  private playbackPreferences = PLAYBACK_PREFERENCES;
   private measurement?: Promise<SessionMeasurements>;
   private links = new Map<
     string,
@@ -384,11 +400,14 @@ export abstract class RoomSession {
       },
       () => this.linkFailed(key),
       this.publishQuality,
+      this.publishPreferences,
       (stream) => this.events.stream(publisher, stream)
     );
     this.links.set(key, { media, publisher, remote, streamId });
     if (publisher !== this.id)
-      void media.requestQuality(this.playbackQuality).catch(() => {});
+      void media
+        .requestQuality(this.playbackQuality, this.playbackPreferences)
+        .catch(() => {});
     return media;
   }
 
@@ -471,21 +490,29 @@ export abstract class RoomSession {
     if (!this.closed) await this.announce();
   }
 
-  async setPublishQuality(quality: StreamQuality) {
+  async setPublishQuality(
+    quality: StreamQuality,
+    preferences = this.publishPreferences
+  ) {
     this.publishQuality = quality;
+    this.publishPreferences = preferences;
     await Promise.all(
       Array.from(this.links.values())
         .filter((link) => link.publisher === this.id)
-        .map((link) => link.media.setPublishQuality(quality))
+        .map((link) => link.media.setPublishQuality(quality, preferences))
     );
   }
 
-  async setPlaybackQuality(quality: StreamQuality) {
+  async setPlaybackQuality(
+    quality: StreamQuality,
+    preferences = this.playbackPreferences
+  ) {
     this.playbackQuality = quality;
+    this.playbackPreferences = preferences;
     await Promise.all(
       Array.from(this.links.values())
         .filter((link) => link.publisher !== this.id)
-        .map((link) => link.media.requestQuality(quality))
+        .map((link) => link.media.requestQuality(quality, preferences))
     );
   }
 

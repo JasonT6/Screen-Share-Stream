@@ -30,6 +30,11 @@ import {
 import {
   browserError,
   QUALITY_PRESETS,
+  VIDEO_PRIORITIES,
+  AUDIO_QUALITIES,
+  PUBLISH_PREFERENCES,
+  PLAYBACK_PREFERENCES,
+  type StreamPreferences,
   type StreamQuality,
   captureDisplay,
   type FrameRate,
@@ -63,8 +68,12 @@ function QualitySelector({
   label,
   value,
   onChange,
-  disabled
+  disabled,
+  preferences,
+  onPreferences
 }: {
+  preferences: StreamPreferences;
+  onPreferences: (value: StreamPreferences) => void;
   id: string;
   label: string;
   value: StreamQuality;
@@ -72,21 +81,85 @@ function QualitySelector({
   disabled?: boolean;
 }) {
   return (
-    <div className="field quality-selector">
-      <label htmlFor={id}>{label}</label>
-      <select
-        id={id}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value as StreamQuality)}
-      >
-        {Object.entries(QUALITY_PRESETS).map(([key, preset]) => (
-          <option key={key} value={key}>
-            {preset.label}
-          </option>
-        ))}
-      </select>
-    </div>
+    <>
+      <div className="field quality-selector">
+        <label htmlFor={id}>{label}</label>
+        <select
+          id={id}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value as StreamQuality)}
+        >
+          {Object.entries(QUALITY_PRESETS).map(([key, preset]) => (
+            <option key={key} value={key}>
+              {preset.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <details className="advanced-settings">
+        <summary>
+          Advanced {id === "playback-quality" ? "playback" : "stream"} settings
+        </summary>
+        <div className="field">
+          <label htmlFor={`${id}-priority`}>Video priority</label>
+          <select
+            id={`${id}-priority`}
+            value={preferences.priority}
+            disabled={disabled}
+            onChange={(event) =>
+              onPreferences({
+                ...preferences,
+                priority: event.target.value as StreamPreferences["priority"]
+              })
+            }
+          >
+            {id === "playback-quality" && (
+              <option value="streamer">Follow streamer</option>
+            )}
+            {Object.entries(VIDEO_PRIORITIES).map(([key, preset]) => (
+              <option key={key} value={key}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+          <p className="field-help">
+            When bandwidth is limited, favor sharper detail, smoother motion, or
+            a balance of both. Source and quality limits still apply.
+          </p>
+        </div>
+        <div className="field">
+          <label htmlFor={`${id}-audio`}>Audio quality</label>
+          <select
+            id={`${id}-audio`}
+            value={preferences.audio}
+            disabled={disabled}
+            onChange={(event) =>
+              onPreferences({
+                ...preferences,
+                audio: event.target.value as StreamPreferences["audio"]
+              })
+            }
+          >
+            {Object.entries(AUDIO_QUALITIES).map(([key, preset]) => (
+              <option key={key} value={key}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+          <p className="field-help">
+            Higher quality allows more audio detail; lower quality uses less
+            data. Actual bitrate depends on the source and browser.
+          </p>
+        </div>
+        <p className="field-help">
+          {id === "playback-quality"
+            ? "Applies only to streams you receive. Video priority overrides the streamer’s preference for your connection; audio quality cannot exceed the streamer’s limit."
+            : "Applies to your outgoing stream, including future viewers. Viewers can choose their own video priority and lower audio quality."}{" "}
+          Changes apply live.
+        </p>
+      </details>
+    </>
   );
 }
 
@@ -291,6 +364,10 @@ function Session({ roomId }: { roomId: string | null }) {
   const [publishQuality, setPublishQuality] = useState<StreamQuality>("source");
   const [playbackQuality, setPlaybackQuality] =
     useState<StreamQuality>("source");
+  const [publishPreferences, setPublishPreferences] =
+    useState(PUBLISH_PREFERENCES);
+  const [playbackPreferences, setPlaybackPreferences] =
+    useState(PLAYBACK_PREFERENCES);
   const [measurements, setMeasurements] = useState(emptyMeasurements);
   const [frameRate, setFrameRate] = useState<FrameRate>(60);
   const [busy, setBusy] = useState(false);
@@ -394,20 +471,28 @@ function Session({ roomId }: { roomId: string | null }) {
     };
   }, [ready]);
 
-  function changePublishQuality(value: StreamQuality) {
+  function changePublishQuality(
+    value: StreamQuality,
+    preferences = publishPreferences
+  ) {
     setPublishQuality(value);
+    setPublishPreferences(preferences);
     void session.current
-      ?.setPublishQuality(value)
+      ?.setPublishQuality(value, preferences)
       .catch(() =>
-        setNotice("Stream quality could not be updated. Please try again.")
+        setNotice("Stream settings could not be updated. Please try again.")
       );
   }
-  function changePlaybackQuality(value: StreamQuality) {
+  function changePlaybackQuality(
+    value: StreamQuality,
+    preferences = playbackPreferences
+  ) {
     setPlaybackQuality(value);
+    setPlaybackPreferences(preferences);
     void session.current
-      ?.setPlaybackQuality(value)
+      ?.setPlaybackQuality(value, preferences)
       .catch(() =>
-        setNotice("Playback quality could not be updated. Please try again.")
+        setNotice("Playback settings could not be updated. Please try again.")
       );
   }
 
@@ -508,8 +593,8 @@ function Session({ roomId }: { roomId: string | null }) {
         return;
       }
       session.current = joined;
-      await joined.setPublishQuality(publishQuality);
-      await joined.setPlaybackQuality(playbackQuality);
+      await joined.setPublishQuality(publishQuality, publishPreferences);
+      await joined.setPlaybackQuality(playbackQuality, playbackPreferences);
       if (attempt.current !== generation) {
         joined.close();
         return;
@@ -643,6 +728,10 @@ function Session({ roomId }: { roomId: string | null }) {
                 label="Playback quality"
                 value={playbackQuality}
                 onChange={changePlaybackQuality}
+                preferences={playbackPreferences}
+                onPreferences={(value) =>
+                  changePlaybackQuality(playbackQuality, value)
+                }
               />
               <p className="field-help">
                 Applies to streams you receive. The streamer’s quality sets the
@@ -711,6 +800,10 @@ function Session({ roomId }: { roomId: string | null }) {
                   label="Stream quality"
                   value={publishQuality}
                   onChange={changePublishQuality}
+                  preferences={publishPreferences}
+                  onPreferences={(value) =>
+                    changePublishQuality(publishQuality, value)
+                  }
                   disabled={busy}
                 />
               )}
@@ -847,6 +940,10 @@ function Session({ roomId }: { roomId: string | null }) {
                 label="Stream quality"
                 value={publishQuality}
                 onChange={changePublishQuality}
+                preferences={publishPreferences}
+                onPreferences={(value) =>
+                  changePublishQuality(publishQuality, value)
+                }
               />
               <p className="field-help">
                 Your outgoing screen quality. Lower settings reduce upload use

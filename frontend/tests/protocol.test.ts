@@ -174,10 +174,58 @@ test("quality requests and upload health validate bounds and remain authenticate
     to: createRoomId(),
     publisher: createRoomId(),
     streamId: randomHex(),
-    signal: { type: "quality", quality: "480p" }
+    signal: {
+      type: "quality",
+      quality: "480p",
+      preferences: { priority: "motion", audio: "low" }
+    }
   });
   await assert.rejects(
     host.unpack({ ...envelope, body: envelope.body.replace("480p", "1080p") })
   );
+  await assert.rejects(
+    host.unpack({
+      ...envelope,
+      body: envelope.body.replace("motion", "detail")
+    })
+  );
+  await assert.rejects(
+    host.unpack({ ...envelope, body: envelope.body.replace("low", "high") })
+  );
   assert.equal((await host.unpack(envelope)).type, "media");
+});
+
+test("advanced quality requests validate preferences including routed messages", () => {
+  const base = { type: "quality", quality: "source" };
+  assert.equal(isSignal(base), true); // Existing clients can omit preferences.
+  for (const priority of ["streamer", "detail", "motion", "balanced"]) {
+    for (const audio of ["high", "standard", "low"]) {
+      assert.equal(
+        isSignal({ ...base, preferences: { priority, audio } }),
+        true
+      );
+    }
+  }
+  for (const preferences of [
+    null,
+    [],
+    {},
+    { priority: "motion" },
+    { priority: "__proto__", audio: "high" },
+    { priority: "motion", audio: 192000 },
+    { priority: "detail", audio: "constructor" }
+  ]) {
+    assert.equal(isSignal({ ...base, preferences }), false);
+    assert.equal(
+      isSignal({
+        type: "media",
+        from: `viewer-${"a".repeat(32)}`,
+        to: `ps-${"b".repeat(32)}`,
+        publisher: `ps-${"b".repeat(32)}`,
+        streamId: "c".repeat(64),
+        signal: { ...base, preferences }
+      }),
+      false
+    );
+  }
 });

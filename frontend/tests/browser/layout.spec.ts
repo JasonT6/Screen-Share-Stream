@@ -17,6 +17,18 @@ for (const width of [1440, 390]) {
         () => document.documentElement.scrollWidth <= window.innerWidth
       )
     ).toBe(true);
+    await page.getByText("Advanced stream settings", { exact: true }).click();
+    await expect(
+      page.getByLabel("Video priority", { exact: true })
+    ).toBeVisible();
+    await expect(page.getByLabel("Audio quality", { exact: true })).toHaveValue(
+      "high"
+    );
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth
+      )
+    ).toBe(true);
     await page.screenshot({
       path: testInfo.outputPath("host.png"),
       fullPage: true

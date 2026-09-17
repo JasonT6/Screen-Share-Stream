@@ -2,6 +2,14 @@
 
 Requirements reset on 2026-09-11: a static browser app for direct one-way video streaming with source audio, password invitations, and immediate connection. Historical LiveKit/account/approval milestones no longer apply.
 
+## Advanced stream settings — 2026-09-17
+
+- Added expandable stream and playback settings with video quality priority, frame rate priority, and balanced adaptation; viewers default to following each streamer and can override priority independently.
+- Added live high/standard/low-data audio bitrate ceilings (192/128/64 kbps), bounded by the publisher’s limit. Settings carry into new connections and sharing restarts within the session.
+- Extended signed quality requests with validated optional preferences; video tuning remains per sender and never changes the shared capture hint for other viewers. Existing source/resolution/frame-rate ceilings and capture permissions remain in effect.
+- Validation: lint, type checking, 16 unit tests, 12 browser tests, formatting, and the production static build passed. The build required clearing a cached sandbox socket error and allowing the local build-worker socket. Automated Edge tests use synthetic capture with real WebRTC: they verify encoder parameters, independent viewer preferences, publisher audio limits, restoration, restart, attendee publishing, decoded frames/audio RTP, authentication, and cleanup. Desktop/mobile screenshots were inspected; long priority labels were shortened to fit narrow controls. The three affected browser tests and static build passed again after that adjustment.
+- Real bandwidth-constrained adaptation, audible fidelity differences, native screen/audio capture, and cross-network delivery remain manual checks.
+
 ## Quality and connection diagnostics — 2026-09-13
 
 - Added live publisher and viewer quality ceilings: Source, 1080p, 720p, 480p; each viewer request is independent and respects the publisher ceiling.

@@ -1,4 +1,9 @@
-import { isStreamQuality, type StreamQuality } from "./media";
+import {
+  isStreamQuality,
+  isStreamPreferences,
+  type StreamQuality,
+  type StreamPreferences
+} from "./media";
 import type { SenderHealth } from "./connection-quality";
 const encoder = new TextEncoder();
 export const ROOM_PATTERN = /^ps-[a-f0-9]{32}$/;
@@ -149,7 +154,7 @@ export class SignedChannel {
 
 type Envelope = { seq: number; body: string; mac: string };
 export type MediaSignal =
-  | { type: "quality"; quality: StreamQuality }
+  | { type: "quality"; quality: StreamQuality; preferences?: StreamPreferences }
   | {
       type: "health";
       summary: SenderHealth;
@@ -217,7 +222,12 @@ export function isSignal(value: unknown): value is Signal {
       ) &&
       isSignal(value.signal)
     );
-  if (value.type === "quality") return isStreamQuality(value.quality);
+  if (value.type === "quality")
+    return (
+      isStreamQuality(value.quality) &&
+      (value.preferences === undefined ||
+        isStreamPreferences(value.preferences))
+    );
   if (value.type === "health") {
     if (
       !isRecord(value.summary) ||

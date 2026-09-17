@@ -70,3 +70,74 @@ test("canceling the system picker is final: no automatic retry or alternate capt
   await assert.rejects(captureDisplay(60), (error) => error === denied);
   assert.equal(calls, 1);
 });
+
+test("advanced preferences preserve publisher audio ceilings and allow per-viewer video priority", async () => {
+  const {
+    resolvePreferences,
+    PUBLISH_PREFERENCES,
+    PLAYBACK_PREFERENCES,
+    tuneSender
+  } = await import("../lib/media");
+  assert.deepEqual(
+    resolvePreferences(PUBLISH_PREFERENCES, PLAYBACK_PREFERENCES),
+    PUBLISH_PREFERENCES
+  );
+  const resolved = resolvePreferences(
+    { priority: "detail", audio: "standard" },
+    { priority: "motion", audio: "high" }
+  );
+  assert.deepEqual(resolved, { priority: "motion", audio: "standard" });
+  assert.equal(
+    resolvePreferences(PUBLISH_PREFERENCES, {
+      priority: "balanced",
+      audio: "low"
+    }).audio,
+    "low"
+  );
+  assert.equal(
+    resolvePreferences(
+      { priority: "motion", audio: "low" },
+      PLAYBACK_PREFERENCES
+    ).priority,
+    "motion"
+  );
+  let applied: RTCRtpSendParameters | undefined;
+  const track = {
+    kind: "video",
+    contentHint: "detail",
+    getSettings: () => ({ width: 1920, height: 1080 })
+  };
+  const sender = {
+    track,
+    getParameters: () => ({ encodings: [{}] }),
+    setParameters: async (value: RTCRtpSendParameters) => {
+      applied = value;
+    }
+  } as unknown as RTCRtpSender;
+  assert.equal(await tuneSender(sender, "720p", resolved), true);
+  assert.equal(applied?.degradationPreference, "maintain-framerate");
+  assert.equal(applied?.encodings[0].scaleResolutionDownBy, 1.5);
+  assert.equal(applied?.encodings[0].maxFramerate, 30);
+  assert.equal(applied?.encodings[0].maxBitrate, 3_000_000);
+  assert.equal(
+    track.contentHint,
+    "detail",
+    "Per-viewer tuning must not modify shared capture"
+  );
+  await tuneSender(sender, "source", { priority: "balanced", audio: "low" });
+  assert.equal(applied?.degradationPreference, "balanced");
+  assert.equal(applied?.encodings[0].scaleResolutionDownBy, 1);
+  await tuneSender(sender);
+  assert.equal(applied?.degradationPreference, "maintain-resolution");
+  track.kind = "audio";
+  await tuneSender(sender, "source", resolved);
+  assert.equal(applied?.encodings[0].maxBitrate, 128_000);
+  await tuneSender(sender, "source", { priority: "detail", audio: "low" });
+  assert.equal(applied?.encodings[0].maxBitrate, 64_000);
+  await tuneSender(sender);
+  assert.equal(applied?.encodings[0].maxBitrate, 192_000);
+  sender.setParameters = async () => {
+    throw new Error("Unsupported");
+  };
+  assert.equal(await tuneSender(sender), false);
+});
