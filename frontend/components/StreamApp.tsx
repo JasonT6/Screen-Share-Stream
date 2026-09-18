@@ -62,6 +62,10 @@ import {
   unknownStatus,
   type ConnectionStatus
 } from "@/lib/connection-quality";
+import LandingPage from "@/components/LandingPage";
+
+import AdvancedDiagnostics from "./AdvancedDiagnostics";
+import { emptyDiagnostics } from "@/lib/diagnostics";
 
 function QualitySelector({
   id,
@@ -369,6 +373,7 @@ function Session({ roomId }: { roomId: string | null }) {
   const [playbackPreferences, setPlaybackPreferences] =
     useState(PLAYBACK_PREFERENCES);
   const [measurements, setMeasurements] = useState(emptyMeasurements);
+  const [diagnostics, setDiagnostics] = useState(emptyDiagnostics);
   const [frameRate, setFrameRate] = useState<FrameRate>(60);
   const [busy, setBusy] = useState(false);
   const [sharingBusy, setSharingBusy] = useState(false);
@@ -411,7 +416,15 @@ function Session({ roomId }: { roomId: string | null }) {
     shareAttempt.current++;
     capture.current?.getTracks().forEach((track) => track.stop());
     capture.current = null;
-    session.current?.close();
+    const current = session.current;
+    current?.close();
+    if (current) {
+      const snapshot = current.diagnostics();
+      setDiagnostics({
+        ...snapshot,
+        websocket: snapshot.websocket === "error" ? "error" : "closed"
+      });
+    }
     session.current = null;
     setOwnId(null);
     setMeasurements(emptyMeasurements());
@@ -499,6 +512,9 @@ function Session({ roomId }: { roomId: string | null }) {
   function eventsFor(generation: number): SessionEvents {
     const current = () => attempt.current === generation;
     return {
+      diagnostics: (value) => {
+        if (current()) setDiagnostics(value);
+      },
       participants: (value) => {
         if (current()) setParticipants(value);
       },
@@ -559,6 +575,7 @@ function Session({ roomId }: { roomId: string | null }) {
     }
     const generation = ++attempt.current;
     setBusy(true);
+    setDiagnostics(emptyDiagnostics());
     setError("");
     setNotice("");
     setEnded(false);
@@ -1005,16 +1022,23 @@ function Session({ roomId }: { roomId: string | null }) {
           </div>
         </aside>
       </div>
+      <AdvancedDiagnostics value={diagnostics} />
     </>
   );
 }
 
 export default function StreamApp() {
-  const [room, setRoom] = useState<string | null | undefined>(undefined);
+  const [room, setRoom] = useState<string | null>(null);
   useEffect(() => {
     const route = () => {
       const hash = window.location.hash.slice(1);
-      setRoom(hash ? new URLSearchParams(hash).get("room") || "invalid" : null);
+      setRoom(
+        hash === "create"
+          ? ""
+          : hash
+            ? new URLSearchParams(hash).get("room") || "invalid"
+            : null
+      );
     };
     route();
     window.addEventListener("hashchange", route);
@@ -1033,12 +1057,10 @@ export default function StreamApp() {
         <span className="header-note">A little closer, wherever you are.</span>
       </header>
       <main>
-        {room === undefined ? (
-          <div className="loading" role="status">
-            Getting ready…
-          </div>
+        {room === null ? (
+          <LandingPage />
         ) : (
-          <Session key={room ?? "host"} roomId={room} />
+          <Session key={room} roomId={room || null} />
         )}
       </main>
       <footer>

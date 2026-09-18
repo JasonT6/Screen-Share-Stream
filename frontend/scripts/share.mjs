@@ -301,7 +301,7 @@ try {
     ? await publicAddress(tunnel, `http://127.0.0.1:${server.address().port}`)
     : localUrl;
   console.log(
-    `\nCopy this host link into your browser:\n\n${url}\n\nChoose a password, then Share screen & audio.\nSend attendees the invitation copied INSIDE the app and the password.\nKeep this terminal running and the host tab open while streaming.\nCtrl+C stops the public link; closing a browser does not stop this command.\n${tunnel ? "Each launch creates a NEW address. Invitations from stopped sessions will not work (Cloudflare error 1033)." : "Local mode: this address works only on this computer."}\n`
+    `\nCopy this host link into your browser:\n\n${url}\n\nClick Create a room, choose a username and password, then Share screen & audio.\nSend attendees the invitation copied INSIDE the app and the password.\nKeep this terminal running and the host tab open while streaming.\nCtrl+C stops the public link; closing a browser does not stop this command.\n${tunnel ? "Each launch creates a NEW address. Invitations from stopped sessions will not work (Cloudflare error 1033)." : "Local mode: this address works only on this computer."}\n`
   );
   if (process.platform === "darwin") {
     const awake = launch("/usr/bin/caffeinate", ["-di"], { stdio: "ignore" });

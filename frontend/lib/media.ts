@@ -100,7 +100,7 @@ export type StreamPreferences = {
   audio: keyof typeof AUDIO_QUALITIES;
 };
 export const PUBLISH_PREFERENCES: StreamPreferences = {
-  priority: "detail",
+  priority: "motion",
   audio: "high"
 };
 export const PLAYBACK_PREFERENCES: StreamPreferences = {
@@ -151,7 +151,7 @@ export async function tuneSender(
     // Never mutate the shared track hint for one viewer's preference.
     parameters.degradationPreference =
       VIDEO_PRIORITIES[
-        preferences.priority === "streamer" ? "detail" : preferences.priority
+        preferences.priority === "streamer" ? "motion" : preferences.priority
       ].degradation;
     // Limit the short edge, preserving aspect ratio for portrait and ultrawide sources.
     const shortEdge = Math.min(
@@ -185,6 +185,7 @@ export type StreamStats = {
   jitterMs?: number;
   rttMs?: number;
   dropped?: number;
+  droppedFrames?: number;
   limitation?: "none" | "bandwidth" | "cpu" | "other";
   state?: RTCPeerConnectionState;
 };
@@ -202,9 +203,10 @@ export type StatsHistory = Map<string, Sample>;
 export async function readStats(
   pc: RTCPeerConnection,
   sending: boolean,
-  previous: StatsHistory
+  previous: StatsHistory,
+  snapshot?: RTCStatsReport
 ): Promise<StreamStats> {
-  const reports = await pc.getStats();
+  const reports = snapshot ?? (await pc.getStats());
   const result: StreamStats = {
     audio: false,
     state: pc.connectionState,
@@ -245,6 +247,8 @@ export async function readStats(
       result.width = report.frameWidth;
       result.height = report.frameHeight;
       result.fps = report.framesPerSecond;
+      if (finite(report.framesDropped))
+        result.droppedFrames = report.framesDropped;
       if (valid) {
         result.mbps = ((sample.bytes - before.bytes) * 8) / (elapsed * 1000);
         result.measured = sample.bytes > before.bytes;
@@ -271,6 +275,7 @@ export async function readStats(
         result.limitation = report.qualityLimitationReason;
       if (sending && report.remoteId) {
         const remote = reports.get(report.remoteId);
+        if (finite(remote?.jitter)) result.jitterMs = remote.jitter * 1000;
         if (finite(remote?.fractionLost))
           result.loss = Math.max(0, Math.min(1, remote.fractionLost));
         if (finite(remote?.roundTripTime))

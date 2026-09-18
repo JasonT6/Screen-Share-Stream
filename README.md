@@ -2,7 +2,23 @@
 
 A browser app for private, multi-participant screen sharing with shared audio. The host starts a stream and sends attendees an invitation link and a password. Everyone chooses a username; attendees open the link, enter the password, and connect automatically. Any participant can share their screen and source audio, and everyone can click an active stream in the participant list to watch it. No accounts, installation, voice chat, or approval lobby.
 
-## Run regularly on your Mac
+## Host on Vercel (recommended)
+
+Deploy once, then everyone opens the website. Hosts and attendees do not need Node.js, a terminal, or `./run.command`.
+
+1. Import this repository into Vercel and set **Root Directory** to `frontend` (the folder containing `package.json` and `vercel.json`).
+2. Select **Other** as the framework preset and Node.js **22.x** or newer. The included `frontend/vercel.json` sets `npm ci`, `npm run build`, and the static output directory `out`, plus the browser security headers. No environment variables are required.
+3. Deploy, then open the production HTTPS address. Use the production domain for invitations; attendees must be able to access it without a Vercel login.
+
+The landing page’s **Create a room** button opens host setup. Choose a username and password, click **Share screen & audio**, and enable source audio in the browser picker. Copy the invitation inside the app and share the password separately. Attendees open that invitation and enter their username and password to connect.
+
+Every new room gets a cryptographically random 256-bit ID. Invitations look like `https://your-site.vercel.app/#room=ps-<64 random hex characters>` and never contain the password. The website stays available independently of your computer; keep the host tab open and computer awake for the room itself to stay active. Ending a session invalidates its invitation.
+
+The deployment serves static assets only; video and shared audio remain peer to peer. See [Vercel setup and deployment checks](docs/deployment/PRODUCTION.md).
+
+## TryCloudflare testing on your Mac
+
+The TryCloudflare launcher is retained alongside Vercel for testing local changes with other people before deployment. Both use the same app source; no separate testing branch or version is needed. Only the person running the test site needs the project and Node.js. Testers open the public invitation in their browsers.
 
 From the project folder, run:
 
@@ -14,7 +30,7 @@ You can also double-click `run.command` in Finder. Requires Node.js 22+. For hos
 
 The launcher installs project dependencies on first use or when the dependency lock changes, builds when app/configuration changes, downloads a pinned official Cloudflare helper once if needed, starts its own static file server on a free local port, verifies a temporary public HTTPS address, and prints a host link for you to copy into your existing browser. It never opens, closes, or configures a browser. Repeat the same command for your next session; the public address changes each time.
 
-Open the newly printed host link, choose a username and password, click **Share screen & audio**, select your source and enable its audio, then send attendees the **invitation copied inside the app** and the password. Leave the terminal running and the host tab open. **Ctrl+C** stops the tunnel and static file server without touching your browser. Closing the host tab ends its stream but does not stop the launcher. While running on macOS, the launcher prevents idle sleep. It checks the public page every 15 seconds and reports sustained failures and recovery in the terminal.
+Open the newly printed host link, click **Create a room**, choose a username and password, click **Share screen & audio**, select your source and enable its audio, then send attendees the **invitation copied inside the app** and the password. Leave the terminal running and the host tab open. **Ctrl+C** stops the tunnel and static file server without touching your browser. Closing the host tab ends its stream but does not stop the launcher. While running on macOS, the launcher prevents idle sleep. It checks the public page every 15 seconds and reports sustained failures and recovery in the terminal.
 
 The [Cloudflare Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/) serves only the static webpage; audio and video remain peer to peer. This is a convenient temporary address, not permanent website hosting or guaranteed availability.
 
@@ -26,6 +42,8 @@ Useful alternatives:
 ./run.command --no-open     # Compatibility alias; no browser opens by default
 ./run.command --help
 ```
+
+After editing the app, stop the launcher with **Ctrl+C**, then run `./run.command --rebuild` to test a fresh production build. Open the newly printed address, create a new room, and send its invitation and password. The local build and tunnel do not deploy to or update Vercel. Use separate devices and networks when evaluating real streaming performance.
 
 From `frontend/`, `npm run share` starts the same launcher. `CLOUDFLARED_BIN` can point to an already installed tunnel helper. Runtime build hashes, the cached helper, and the tunnel log are stored in ignored `frontend/.runtime/`.
 
@@ -62,13 +80,13 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000` in desktop Chrome or Edge. Choose a username and any nonblank password (short passwords are accepted), then **Share screen & audio**. In the browser picker, select a tab and enable **Share tab audio**. Screen/window audio depends on browser and operating-system support. Capture is rejected if no audio track is present.
+Open `http://localhost:3000` in desktop Chrome or Edge. Click **Create a room**, then choose a username and any nonblank password (short passwords are accepted), then **Share screen & audio**. In the browser picker, select a tab and enable **Share tab audio**. Screen/window audio depends on browser and operating-system support. Capture is rejected if no audio track is present.
 
 After the connection service is ready, copy the invitation and share the password separately. Test with another browser window. Keep the host tab open and the computer awake. **Stop sharing** (including the browser’s button) stops only your publication and keeps the session open. You can share again using the same invitation. **End stream** or closing the host tab ends the session for everyone. A new session creates a new invitation; old invitations do not follow the new session.
 
-A localhost link only works on the same computer. For attendees elsewhere, use `./run.command` or publish the static build on an HTTPS host as described below.
+A localhost link only works on the same computer. For attendees elsewhere, use the Vercel deployment described above. The optional `./run.command` launcher is available for temporary hosting.
 
-## Publish the web app
+## Other static hosts
 
 ```sh
 cd frontend
@@ -85,7 +103,7 @@ See [web publishing](docs/deployment/PRODUCTION.md) for configuration and limita
 
 - Video and shared audio travel directly from each publisher’s browser to every other participant over encrypted WebRTC connections.
 - The static website still needs somewhere to serve its HTML, CSS, and JavaScript.
-- [PeerJS Cloud](https://peerjs.com/client/getting-started) provides public rendezvous/signaling. Google STUN provides network discovery. You do not operate either service. They are external dependencies, so this is not an offline or literally infrastructure-free application.
+- [PeerJS Cloud / PeerServer](https://github.com/peers/peerjs-server) provides public WebSocket message routing. The app connects with the browser’s native secure WebSocket API; the PeerJS client and WebRTC data channels are not used. Google STUN provides network discovery. You do not operate either service. They are external dependencies, so this is not an offline or literally infrastructure-free application.
 - There is deliberately **no TURN relay**. Networks that cannot establish direct WebRTC connections will fail with an explanation; trying a different network may help. Universal NAT/firewall connectivity would require allowing a relay.
 - Every active publisher sends a separate stream to every other participant, even when its stream is not selected. Upload and encoding costs grow with both publishers and participants. This app targets small private groups, not scale.
 
@@ -95,7 +113,7 @@ Capture keeps the source’s available resolution. **Stream quality** sets your 
 
 **Playback quality**, below the player when watching someone else, requests a lower ceiling for streams received by your browser. It does not change another attendee’s playback. The effective quality is the lower of the publisher’s ceiling and your choice. Returning to Source removes your extra limit; it cannot exceed the streamer’s setting. Changes apply live and carry forward to new streams in the session.
 
-Expand **Advanced stream settings** under Stream quality to choose **Quality priority** (preserve sharper detail), **Frame rate priority** (preserve smoother motion), or **Balanced** when bandwidth is limited. **Audio quality** sets a bitrate ceiling: High (192 kbps), Standard (128 kbps), or Low data (64 kbps). These settings apply live and carry forward when you restart sharing in the same session.
+Expand **Advanced stream settings** under Stream quality to choose **Quality priority** (preserve sharper detail), **Frame rate priority** (default; preserve smoother motion), or **Balanced** when bandwidth is limited. **Audio quality** sets a bitrate ceiling: High (192 kbps), Standard (128 kbps), or Low data (64 kbps). These settings apply live and carry forward when you restart sharing in the same session.
 
 Viewers have **Advanced playback settings** under Playback quality. Video priority defaults to **Follow streamer**; an override affects only that viewer’s incoming connections. Audio uses the lower of the streamer’s and viewer’s limits. Priority does not raise the selected video preset’s frame-rate/resolution ceilings or the captured source frame rate. Bitrates are limits, not guaranteed rates or a volume control; browser congestion control and source quality still determine delivery.
 
@@ -105,9 +123,17 @@ The player shows actual video dimensions and stream statistics. Your own preview
 
 For reliable audio capture, use a tab in desktop Chrome/Edge and explicitly enable tab audio. [Browser capture support varies](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia); requesting audio cannot force a browser or OS to supply it. An audio track can also be silent if the source is not playing sound. Viewers may use other WebRTC-capable desktop or mobile browsers, subject to device testing.
 
+## Advanced Diagnostics
+
+At the bottom of a session, select **Advanced Diagnostics** for WebSocket/authentication state and every media connection’s WebRTC, ICE, and SDP signaling states. It shows local/remote candidate types and protocols, the selected pair when the browser exposes it, RTT, video bitrate, packet loss, jitter, FPS, resolution, dropped frames, ICE error codes, restart count, and time from media connection creation to first connection. Missing browser measurements display as unavailable. Failed media attempts remain visible until that publication or session is replaced.
+
+**Copy diagnostics** exports an allowlisted JSON snapshot. IP addresses (including IPv6 and mDNS hostnames) are omitted/redacted at collection time; raw candidates, SDP, URLs, usernames, invitation IDs, passwords, keys, proofs, and MACs are never exported. Clipboard failure exposes the same sanitized JSON for manual copying. Diagnoses such as “STUN may be unreachable” and “this network may require TURN” are estimates, not definitive causes.
+
+Each media link gets at most one automatic ICE restart, offered by its publisher; a receiver can request that same restart over authenticated WebSocket. There is still no TURN. A failed media link does not remove an authenticated attendee from the roster. A lost WebSocket session closes affected media/capture with a reconnect message, rather than resuming an ambiguous signed sequence. Abrupt remote tab loss is detected by signed heartbeats after about 30–35 seconds (background browser throttling can delay detection).
+
 ## Password protection
 
-The host browser checks a fresh challenge-response before creating any media sender. Passwords and room keys remain in browser memory, never in URLs, storage, signaling metadata, or a database. PBKDF2-HMAC-SHA256 derives a room-specific key; HMAC authenticates the password proof and all subsequent SDP/ICE messages, including media fingerprints and sequence numbers. Authenticated participants receive a signed roster of usernames and publication IDs. The host routes signed SDP/ICE messages between admitted participants; media travels directly between publishers and attendees. Each publication has a fresh ID so stale messages cannot revive a stopped stream. Unsolicited PeerJS media calls are rejected.
+The host browser checks a fresh challenge-response before creating any media sender. Passwords and room keys remain in browser memory, never in URLs, storage, signaling metadata, or a database. PBKDF2-HMAC-SHA256 derives a room-specific key; HMAC authenticates the password proof and all subsequent SDP/ICE messages, including media fingerprints and sequence numbers. Authenticated participants receive a signed roster of usernames and publication IDs. The host routes signed SDP/ICE messages between admitted participants; media travels directly between publishers and attendees. Each publication has a fresh ID so stale messages cannot revive a stopped stream. Authentication, rosters, SDP, ICE candidates, quality/health controls, and signed presence heartbeats all use WebSocket, so joining and seeing the roster do not depend on direct ICE connectivity. Media peer connections are created only after authentication. Old data-channel clients must reload the updated app to join; the transport protocols are not interoperable.
 
 Share a strong, unique password separately from the invitation. This is shared-password access, not individual identity: anyone with both can watch or forward them. It is not a PAKE; captured authentication transcripts permit offline password guessing, so a longer unpredictable phrase or the optional generator offers stronger protection; length and complexity are not enforced. Peers learn each other's connection addresses. Usernames are session display names, not verified identities, and duplicates are allowed. End the session and create a new one to replace access credentials.
 

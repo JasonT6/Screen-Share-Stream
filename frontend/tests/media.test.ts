@@ -128,7 +128,7 @@ test("advanced preferences preserve publisher audio ceilings and allow per-viewe
   assert.equal(applied?.degradationPreference, "balanced");
   assert.equal(applied?.encodings[0].scaleResolutionDownBy, 1);
   await tuneSender(sender);
-  assert.equal(applied?.degradationPreference, "maintain-resolution");
+  assert.equal(applied?.degradationPreference, "maintain-framerate");
   track.kind = "audio";
   await tuneSender(sender, "source", resolved);
   assert.equal(applied?.encodings[0].maxBitrate, 128_000);

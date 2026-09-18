@@ -6,7 +6,8 @@ import {
 } from "./media";
 import type { SenderHealth } from "./connection-quality";
 const encoder = new TextEncoder();
-export const ROOM_PATTERN = /^ps-[a-f0-9]{32}$/;
+// Accept existing invitations as well as new 256-bit room identifiers.
+export const ROOM_PATTERN = /^ps-(?:[a-f0-9]{32}|[a-f0-9]{64})$/;
 const HEX_32 = /^[a-f0-9]{64}$/;
 
 export function randomHex(bytes = 32): string {
@@ -16,7 +17,7 @@ export function randomHex(bytes = 32): string {
 }
 
 export function createRoomId(): string {
-  return `ps-${randomHex(16)}`;
+  return `ps-${randomHex(32)}`;
 }
 
 export function passwordError(password: string): string | null {
@@ -103,7 +104,7 @@ export function authContext(
 }
 
 // The MAC also authenticates SDP fingerprints. A signaling intermediary cannot
-// substitute its own media endpoint, even if it intercepts the data connection.
+// substitute its own media endpoint, even if it controls the WebSocket signaling service.
 export class SignedChannel {
   private sent = 0;
   private received = 0;
@@ -154,6 +155,7 @@ export class SignedChannel {
 
 type Envelope = { seq: number; body: string; mac: string };
 export type MediaSignal =
+  | { type: "restart" }
   | { type: "quality"; quality: StreamQuality; preferences?: StreamPreferences }
   | {
       type: "health";
@@ -180,17 +182,23 @@ export type Signal =
   | MediaSignal
   | RoutedMedia
   | { type: "ended" }
+  | { type: "ping" }
+  | { type: "pong" }
   | { type: "profile"; username: string }
   | { type: "publish"; streamId: string | null }
   | { type: "roster"; participants: Participant[] };
 
-function isPeerId(value: unknown): value is string {
-  return typeof value === "string" && /^(ps|viewer)-[a-f0-9]{32}$/.test(value);
+export function isPeerId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    (ROOM_PATTERN.test(value) || /^viewer-[a-f0-9]{32}$/.test(value))
+  );
 }
 
 export function isSignal(value: unknown): value is Signal {
   if (!isRecord(value)) return false;
-  if (value.type === "ended") return true;
+  if (["ended", "ping", "pong", "restart"].includes(String(value.type)))
+    return true;
   if (value.type === "profile")
     return typeof value.username === "string" && !usernameError(value.username);
   if (value.type === "publish")
@@ -217,7 +225,7 @@ export function isSignal(value: unknown): value is Signal {
       isPeerId(value.publisher) &&
       isNonce(value.streamId) &&
       isRecord(value.signal) &&
-      ["description", "candidate", "quality", "health"].includes(
+      ["description", "candidate", "quality", "health", "restart"].includes(
         String(value.signal.type)
       ) &&
       isSignal(value.signal)

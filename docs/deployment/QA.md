@@ -10,13 +10,23 @@ npx playwright install chromium
 npm run verify:browser
 ```
 
-Use `BROWSER_EXECUTABLE` to point to an installed Chromium browser instead of installing one. The browser suite starts its own static-app development process on port 3100 and a **test-only** PeerJS signaling fixture on 9001. Production uses the public service; neither test process is part of deployment.
+Use `BROWSER_EXECUTABLE` to point to an installed Chromium browser instead of installing one. The browser suite starts its own static-app development process on port 3100 and a **test-only** PeerServer WebSocket fixture on 9001. Production uses the public service; neither test process is part of deployment.
 
 To verify the built artifact with the default public signaling service, run `npm run build`, then `TEST_STATIC_EXPORT=1 npm run verify:browser`. Set `BROWSER_EXECUTABLE` if needed. This mode requires internet access, uses `out/`, and starts only the local static preview process on port 3100. It still uses synthetic capture and does not replace a test between two physical devices on different networks.
 
 Unit tests verify room/password validation, challenge binding, wrong-password failures, signed SDP integrity, replay/reflection rejection, capture audio requirements, and STUN-only configuration. Browser tests replace only the screen picker with synthetic 1920×1080 frames and a tone, then check real WebRTC media transport, decoded resolution, audio RTP, and send/receive direction. They do not prove that a real OS capture picker supplies audio or that a speaker plays it.
 
-## Regular-use launcher and private picker
+## Vercel landing page and invitations
+
+- Import with Root Directory `frontend` and verify the checked-in build/output settings deploy successfully.
+- Open the production HTTPS domain without a Vercel login: the landing page and **Create a room** link must work at desktop and mobile widths.
+- Check **Create a room**, Back, Forward, and reload on `/#create`; host setup should remain reachable.
+- Start sharing and verify the copied invitation uses the production domain plus `#room=ps-` and 64 random hex characters. End the room and start another; its invitation must differ.
+- Open an invitation directly and reload it: show username/password entry, then connect with the correct password. A malformed invitation must show the invalid-link message.
+- Verify response headers disable camera/microphone but permit display capture. Keep the terminal closed throughout the deployed flow.
+- Leave the room for the landing page: release capture tracks and end the host session for attendees.
+
+## Optional local launcher and private picker
 
 - Run `./run.command --help`; confirm it works before dependencies are installed.
 - Run `./run.command`: dependencies/build are prepared, a verified public address is printed, and no browser opens. Paste the printed link into an existing browser.
@@ -89,7 +99,16 @@ Unit tests verify room/password validation, challenge binding, wrong-password fa
 - Publish `out/` over HTTPS with public default signaling settings and test a real remote attendee.
 - Test different Wi-Fi and mobile data separately. If direct ICE fails, the app should time out with network guidance.
 - Use browser WebRTC diagnostics to verify selected candidates are never TURN relay candidates.
-- Simulate public signaling unavailability: new sessions fail clearly; already connected media should remain usable.
+- Simulate public WebSocket signaling loss: the affected session must close its media/capture, retain diagnostics, and show reconnect guidance. Rejoining uses fresh authentication. Closing a remote tab without a goodbye must be detected by signed heartbeats.
 - Check layout on narrow screens, keyboard focus, readable errors, and sound-play affordances.
 
 Record the browser, OS, source size, audio-source choice, and network for manual results. Do not mark these real-device/network checks passed from synthetic local tests.
+
+## WebSocket and Advanced Diagnostics
+
+- Verify authentication and roster updates succeed with ICE blocked; a wrong password must create no media peer connection on either side. No RTC data channels should appear.
+- Inspect Advanced Diagnostics on desktop/mobile before join, while connecting, when connected, after ICE failure, and after leaving. Check all state fields, candidate types/protocols, selected pair, metrics, errors, restart count and setup time.
+- Trigger ICE failure on either end: only the publisher offers, with at most one restart per media link. An exhausted attempt stays diagnosed and does not remove authenticated membership.
+- Check STUN-unreachable and restrictive-NAT cases on real networks; labels must remain estimates and no relay candidates should appear.
+- Copy diagnostics from successful and failed sessions: verify valid JSON, redacted addresses, and no raw SDP/candidate strings, URLs, usernames, invitation IDs, passwords, keys, proofs, MACs, or ICE credentials. Test the manual-copy fallback when clipboard permission is denied.
+- Synthetic ICE suppression and injected ICE failures exercise control flow only; they do not prove real cross-network recovery or NAT diagnosis accuracy.

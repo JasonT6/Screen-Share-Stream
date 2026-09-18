@@ -2,6 +2,35 @@
 
 Requirements reset on 2026-09-11: a static browser app for direct one-way video streaming with source audio, password invitations, and immediate connection. Historical LiveKit/account/approval milestones no longer apply.
 
+## Native WebSocket signaling and Advanced Diagnostics — 2026-09-18
+
+- Removed the PeerJS browser dependency and all RTC data-channel setup. Native WSS to the existing public PeerServer service carries authentication, signed rosters, SDP/ICE, publishing/quality/health controls, restart requests, and presence. The `peer` dev dependency remains only for local test signaling. Static hosting and STUN-only direct screen/audio media remain in place.
+- Preserved PBKDF2/HMAC challenges, role/session/sequence binding, replay rejection, publication IDs, membership/sender/direction validation, and the rule that media is allocated only after password authentication. WSS is enforced for public service endpoints; plaintext WS is limited to loopback tests. Old clients must reload after the protocol upgrade.
+- Added bounded signed presence heartbeats and explicit cleanup/rejoin guidance on WebSocket loss. Signed sequence numbers are not resumed across a broken socket. This replaces the former data channel’s ability to keep control signaling alive during a public signaling outage.
+- Kept one publisher-owned ICE restart per media link, including receiver requests and setup-timeout recovery. Restart-generation candidates are queued until their SDP; failure snapshots remain visible without ejecting authenticated participants.
+- Added the bottom Advanced Diagnostics tab with socket/authentication and RTC/ICE states, candidate types/protocols, selected pair, interval metrics, numeric ICE errors, restart count, setup time and conservative diagnoses. Copy diagnostics exports an explicit allowlist; addresses are redacted and raw SDP, candidate strings, URLs, identities and secret material are excluded. Clipboard denial offers the same sanitized JSON for manual copying.
+- Validation for this change: `npm run check` (lint, type checking, all 22 unit tests, production static build), formatting, and all 16 Edge browser tests passed. Browser tests use synthetic capture with real WebRTC and fail if any RTC data channel is created. New checks cover authentication with ICE suppressed, no media allocation on wrong passwords, selected-pair/metric reporting, secret/IPv4/IPv6/mDNS exclusion, clipboard fallback, repeated failure events, retry exhaustion, receiver-requested actual ICE restart/recovery, and socket-loss cleanup. Existing simultaneous publishing, audio RTP, source dimensions, quality controls, cancellation and leave/end tests passed. Desktop and 390px diagnostics screenshots were inspected.
+- Build validation needed local worker-socket access and clearing the generated cache of an initial sandbox-related failure. No deployment was performed. Automatic approval review blocked the optional public-WSS static-export smoke test because it sends test authentication/signaling and ICE metadata to an external service; public-service compatibility remains unverified for this change. Actual screen/audio capture, separate-device playback and cross-network NAT/STUN behavior remain manual checks.
+
+## Retained TryCloudflare testing workflow — 2026-09-18
+
+- Confirmed the existing local launcher remains available alongside Vercel. Documented using the same app source for public pre-deployment testing, rebuilding after changes, and distributing fresh invitations without requiring testers to install the project.
+- Validation: launcher help, shell and JavaScript syntax checks, and diff whitespace checks passed. No runtime code changed; no public tunnel was started, remote streaming tested, or Vercel deployment performed for this documentation update.
+
+## Frame rate priority default — 2026-09-18
+
+- Publishing now defaults to Frame rate priority (motion), including the sender fallback. Viewers continue to follow the streamer by default; explicit priority choices remain available.
+- Updated the existing default sender assertion and the product/setup documentation.
+- Validation: lint, type checking, all 16 unit tests, formatting, and the production static build passed. Browser tests were attempted but could not start because an existing Next.js development server holds the project lock; that server was left running. Real bandwidth adaptation and screen/audio capture were not manually tested.
+
+## Vercel landing page and stronger room IDs — 2026-09-18
+
+- Added a prerendered, responsive landing page with **Create a room**, a short explanation of the sharing flow, and browser/audio guidance. Host setup uses `/#create`; direct invitation links still open attendee entry. Leaving the session for the landing page releases capture and closes the room.
+- Added `frontend/vercel.json` for static deployment: Other preset, `npm ci`, `npm run build`, output `out`, and capture/referrer/content-type response headers. Documentation now recommends the hosted website, with `./run.command` retained as an optional local tool. Hosts and attendees need only the deployed website.
+- New room IDs use 256 bits from Web Crypto, encoded as 64 hexadecimal characters. Room and participant-message validation accept the new format and legacy 128-bit room IDs. Invitations retain the page origin and exclude passwords.
+- Validation: lint, type checking, all 16 unit tests, formatting, and the production static build passed. The build required allowing the local Next.js worker socket after clearing the sandbox-failed cache. All 13 browser tests passed in Edge with synthetic capture and real WebRTC, including longer-ID authentication, multi-participant media, quality controls, and cleanup. The two desktop/mobile navigation and layout tests also passed against the production static export. Landing-page screenshots at 1440px and 390px were inspected; the export contains the landing content in its HTML.
+- No Vercel deployment was performed. Deployed response headers/access settings, real screen/audio capture, and delivery between different physical networks remain manual checks.
+
 ## Advanced stream settings — 2026-09-17
 
 - Added expandable stream and playback settings with video quality priority, frame rate priority, and balanced adaptation; viewers default to following each streamer and can override priority independently.

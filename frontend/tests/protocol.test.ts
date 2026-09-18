@@ -17,7 +17,15 @@ import {
 test("unguessable room IDs and nonces have the expected entropy and format", () => {
   const rooms = new Set(Array.from({ length: 100 }, createRoomId));
   assert.equal(rooms.size, 100);
-  for (const room of rooms) assert.match(room, ROOM_PATTERN);
+  for (const room of rooms) {
+    assert.match(room, /^ps-[a-f0-9]{64}$/);
+    assert.match(room, ROOM_PATTERN);
+  }
+  assert.match(`ps-${"a".repeat(32)}`, ROOM_PATTERN); // Existing invitations.
+  for (const length of [0, 31, 33, 63, 65]) {
+    assert.equal(ROOM_PATTERN.test(`ps-${"a".repeat(length)}`), false);
+  }
+  assert.equal(ROOM_PATTERN.test(`ps-${"g".repeat(64)}`), false);
   assert.equal(randomHex().length, 64);
   assert.equal(passwordError("a"), null);
   assert.equal(passwordError("short"), null);
@@ -228,4 +236,40 @@ test("advanced quality requests validate preferences including routed messages",
       false
     );
   }
+});
+
+test("presence and ICE restart controls retain replay and direction protection", async () => {
+  const key = await deriveRoomKey("password", createRoomId());
+  const host = new SignedChannel(key, "fresh context", "host");
+  const viewer = new SignedChannel(key, "fresh context", "viewer");
+  for (const type of ["ping", "pong", "restart"] as const) {
+    const envelope = await viewer.pack({ type });
+    assert.equal((await host.unpack(envelope)).type, type);
+    await assert.rejects(host.unpack(envelope));
+    await assert.rejects(
+      new SignedChannel(key, "fresh context", "viewer").unpack(envelope)
+    );
+  }
+  assert.equal(
+    isSignal({
+      type: "media",
+      from: `viewer-${"a".repeat(32)}`,
+      to: createRoomId(),
+      publisher: createRoomId(),
+      streamId: randomHex(),
+      signal: { type: "restart" }
+    }),
+    true
+  );
+  assert.equal(
+    isSignal({
+      type: "media",
+      from: `viewer-${"a".repeat(32)}`,
+      to: createRoomId(),
+      publisher: createRoomId(),
+      streamId: randomHex(),
+      signal: { type: "ping" }
+    }),
+    false
+  );
 });

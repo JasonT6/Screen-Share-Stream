@@ -13,12 +13,12 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts tests/*.test.mjs",
     "verify:browser": "playwright test",
-    "check": "npm run lint && npm run typecheck && npm test && npm run build"
+    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "verify:signaling": "node --import tsx scripts/check-signaling.ts"
   },
   "dependencies": {
     "lucide-react": "0.468.0",
     "next": "16.3.4",
-    "peerjs": "1.5.5",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

@@ -1,11 +1,31 @@
 import { test, expect } from "@playwright/test";
 
 for (const width of [1440, 390]) {
-  test(`host and invitation are usable at ${width}px`, async ({
+  test(`landing, host and invitation are usable at ${width}px`, async ({
     page
   }, testInfo) => {
     await page.setViewportSize({ width, height: 960 });
     await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "A screen worth sharing." })
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth
+      )
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("landing.png"),
+      fullPage: true
+    });
+    await page.getByRole("link", { name: "Create a room" }).click();
+    await expect(page).toHaveURL(/#create$/);
+    await page.goBack();
+    await expect(
+      page.getByRole("link", { name: "Create a room" })
+    ).toBeVisible();
+    await page.goForward();
+    await page.reload();
     await expect(
       page.getByRole("heading", { name: "Start a stream", exact: true })
     ).toBeVisible();
@@ -33,7 +53,7 @@ for (const width of [1440, 390]) {
       path: testInfo.outputPath("host.png"),
       fullPage: true
     });
-    await page.goto("/#room=ps-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    await page.goto(`/#room=ps-${"a".repeat(64)}`);
     await expect(
       page.getByRole("heading", { name: "Join the stream", exact: true })
     ).toBeVisible();

@@ -2,13 +2,24 @@
 
 The user does not run a streaming server. Publish static website assets, then the host and attendees stream directly between their browsers.
 
-## Start a session without setting up hosting
+## Vercel deployment (recommended)
 
-On the Mac, run `./run.command` from the project root (or double-click it in Finder). The launcher handles build, a local static file server, a temporary public HTTPS tunnel, and a verified host link printed for copying into your browser. It does not open or configure browsers. Use `Ctrl+C` to stop it. Keep the terminal and host window open for the session. Each launch produces a new public address; share invitations copied from that address, not an old localhost or tunnel link.
+1. Import the repository in Vercel. Set **Root Directory** to `frontend`, where `package.json` and `vercel.json` live.
+2. Select the **Other** framework preset and Node.js **22.x** or newer. The checked-in configuration uses `npm ci` to install, `npm run build` to build, and `out` as the output directory. It deliberately publishes the static export, with no application server or serverless API.
+3. Deploy with the default public signaling settings; no environment variables or secrets are needed.
+4. Open the production HTTPS domain and click **Create a room**. Choose a username and password, share a screen with audio, and copy the generated invitation. Share the password separately.
 
-Requires Node.js 22+; use desktop Chrome/Edge for host capture. The first launch needs internet access to install dependencies and, unless already present, download the official pinned Cloudflare helper into `frontend/.runtime/bin/`. The launcher uses its own free local port and only exposes `out/`. It does not open an application API, database, source directory, or media relay. `--local` skips the public tunnel, and `--no-open` remains a compatibility alias for the default behavior. The terminal monitors public-page availability; see the README for error 1033 recovery and fresh-invitation instructions. See the root README for macOS picker limitations and browser behavior.
+Vercel’s [project configuration reference](https://vercel.com/docs/project-configuration/vercel-json) documents these settings and response headers. Use the production URL or a custom domain accessible to attendees; a deployment protected by a Vercel login cannot be used by guests without that access. Preview URLs may have different access settings.
 
-For a stable website URL independent of the running Mac, publish the static files as below.
+The landing page is `/`, host setup is `/#create`, and invitations are `/#room=ps-<64 random hex characters>`. All three use the same exported HTML page, so no dynamic routes or rewrite rules are needed. New IDs use 32 bytes from Web Crypto (256 bits); older 128-bit invitations are still accepted by the current client while their host remains online. Passwords are never put in URLs.
+
+Hosts and attendees open the deployed site directly. They do not install dependencies, run `./run.command`, or keep a terminal/tunnel running. The host must still keep the browser tab open and computer awake because that browser owns the active room. Reloading or closing it ends the session. Vercel only serves the website; media stays peer to peer.
+
+`frontend/vercel.json` applies the same security headers as `public/_headers`, which Vercel does not use as header configuration. Screen capture remains allowed; microphone and camera capture are disabled.
+
+## Optional temporary local hosting
+
+The existing `./run.command` / `npm run share` launcher remains available for local use and temporary Cloudflare HTTPS tunnels. Open its printed link and click **Create a room**. This alternative requires Node.js 22+, a running terminal, and a fresh address on each launch. It is not needed for the Vercel deployment. See the README for launcher options and tunnel troubleshooting.
 
 ## Build and publish
 
@@ -28,7 +39,7 @@ If hosting supports a `_headers` file, the included `frontend/public/_headers` d
 
 ## External services
 
-By default, the frontend connects securely to `0.peerjs.com:443` for PeerJS signaling and uses `stun.l.google.com:19302` / `stun1.l.google.com:19302` for address discovery. PeerJS only brokers the initial direct data connection. Authenticated SDP/ICE messages for the separate media connection travel on that data channel. Video/audio never use a media server or TURN relay.
+By default, the frontend connects securely to `0.peerjs.com:443` for native secure WebSocket signaling through PeerServer and uses `stun.l.google.com:19302` / `stun1.l.google.com:19302` for address discovery. Authentication, rosters, signed SDP/ICE, presence and control messages travel over that WebSocket. PeerServer forwards opaque application payloads; the frontend no longer includes the PeerJS client or creates WebRTC data channels. The `peer` development dependency is only the local test fixture. Video/audio never use a media server or TURN relay.
 
 Availability of these public services is outside the app's control. Their operators can see service requests and network metadata. Peers also discover each other's reachable network addresses. The web host serves assets and must be trusted to serve unmodified code.
 
@@ -43,7 +54,7 @@ No environment file is needed. `frontend/.env.example` documents the only suppor
 - `NEXT_PUBLIC_PEER_PATH`: defaults to `/`.
 - `NEXT_PUBLIC_PEER_SECURE`: defaults to `true`.
 
-These are public build-time values, not secrets. The defaults use public signaling; changing them is only useful when you deliberately choose another compatible signaling service. Use TLS for public deployment. Rebuild after any change. The browser test config overrides these values for its localhost test fixture; never publish a build made with those test overrides.
+These are public build-time values, not secrets. The defaults use public signaling; changing them is only useful when you deliberately choose another compatible signaling service. Use TLS for public deployment; plaintext `ws:` is rejected except for loopback test hosts. The existing variable names are retained for compatible PeerServer routing, not a PeerJS client. Old app clients must reload after this transport upgrade. Rebuild after any change. The browser test config overrides these values for its localhost test fixture; never publish a build made with those test overrides.
 
 Old `DATABASE_URL`, `LIVEKIT_*`, `TURN_*`, and account/session configuration is unused. Existing private `.env` files may contain obsolete settings; they are not copied into the static export or required by this app.
 

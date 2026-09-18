@@ -9,6 +9,20 @@ async function prepare(page: Page, withAudio = true) {
     ({ withAudio }) => {
       const pcs: RTCPeerConnection[] = [];
       const NativePeerConnection = window.RTCPeerConnection;
+      NativePeerConnection.prototype.createDataChannel = () => {
+        throw new Error(
+          "Authentication and signaling must not use RTC data channels"
+        );
+      };
+      const sockets: WebSocket[] = [];
+      window.WebSocket = new Proxy(window.WebSocket, {
+        construct(target, args) {
+          const socket = new target(...(args as [string]));
+          sockets.push(socket);
+          return socket;
+        }
+      });
+      Object.assign(window, { testSockets: sockets });
       window.RTCPeerConnection = new Proxy(NativePeerConnection, {
         construct(target, args) {
           const pc = new target(...args);
@@ -68,11 +82,15 @@ async function prepare(page: Page, withAudio = true) {
 async function hostStream(page: Page) {
   await prepare(page);
   await page.goto("/");
+  await page.getByRole("link", { name: "Create a room" }).click();
   await page.getByLabel("Username", { exact: true }).fill("Host");
   await page.getByLabel("Stream password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Share screen & audio" }).click();
   await expect(page.getByLabel("Private invitation")).toBeVisible();
-  return page.getByLabel("Private invitation").inputValue();
+  const invitation = await page.getByLabel("Private invitation").inputValue();
+  expect(new URL(invitation).origin).toBe(new URL(page.url()).origin);
+  expect(new URL(invitation).hash).toMatch(/^#room=ps-[a-f0-9]{64}$/);
+  return invitation;
 }
 
 async function connect(
@@ -156,7 +174,7 @@ test("password gates real native-resolution video and audio; multiple viewers, r
   const errors: string[] = [];
   host.on("pageerror", (error) => errors.push(error.message));
   const invitation = await hostStream(host);
-  expect(invitation).toMatch(/#room=ps-[a-f0-9]{32}$/);
+  expect(invitation).toMatch(/#room=ps-[a-f0-9]{64}$/);
   expect(new URL(invitation).search).toBe("");
   expect([
     ...new URLSearchParams(new URL(invitation).hash.slice(1)).keys()
@@ -176,6 +194,20 @@ test("password gates real native-resolution video and audio; multiple viewers, r
       )
     )
   ).toBe(false);
+  expect(
+    await host.evaluate(
+      () =>
+        (window as unknown as { testPeers: RTCPeerConnection[] }).testPeers
+          .length
+    )
+  ).toBe(0);
+  expect(
+    await viewer.evaluate(
+      () =>
+        (window as unknown as { testPeers: RTCPeerConnection[] }).testPeers
+          .length
+    )
+  ).toBe(0);
   await viewer.getByLabel("Password", { exact: true }).fill(password);
   await viewer.getByRole("button", { name: "Try again" }).click();
   await receiveAudioVideo(viewer);
@@ -223,6 +255,7 @@ test("missing audio releases the screen and prevents going live", async ({
 }) => {
   await prepare(page, false);
   await page.goto("/");
+  await page.getByRole("link", { name: "Create a room" }).click();
   await page.getByLabel("Username", { exact: true }).fill("Host");
   await page.getByLabel("Stream password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Share screen & audio" }).click();
@@ -247,7 +280,9 @@ test("invalid invitations and offline hosts have actionable errors", async ({
     page.getByRole("heading", { name: "This invitation isn’t valid." })
   ).toBeVisible();
   await connect(page, "/#room=ps-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-  await expect(page.locator(".problem")).toContainText("host is offline");
+  await expect(page.locator(".problem")).toContainText("host is offline", {
+    timeout: 30_000
+  });
 });
 
 test("browser Stop sharing ends publication but keeps the session open", async ({
@@ -322,6 +357,7 @@ test("canceling capture startup releases a late source and never opens an invita
 }) => {
   await prepare(page);
   await page.goto("/");
+  await page.getByRole("link", { name: "Create a room" }).click();
   await page.evaluate(() => {
     const capture = navigator.mediaDevices.getDisplayMedia;
     navigator.mediaDevices.getDisplayMedia = async (options) => {
@@ -723,4 +759,289 @@ test("advanced stream settings apply live per viewer, respect audio ceilings, an
   await host.getByRole("button", { name: "End stream", exact: true }).click();
   await alice.close();
   await bob.close();
+});
+
+test("returning to the landing page ends the room and releases capture", async ({
+  browser,
+  page: host
+}) => {
+  const invitation = await hostStream(host);
+  const viewer = await browser.newPage();
+  await connect(viewer, invitation);
+  await receiveAudioVideo(viewer);
+  await host.evaluate(() => {
+    window.location.hash = "";
+  });
+  await expect(host.getByRole("link", { name: "Create a room" })).toBeVisible();
+  await expect(
+    viewer.getByRole("heading", { name: "That’s a wrap." })
+  ).toBeVisible();
+  expect(
+    await host.evaluate(() =>
+      (window as unknown as { testCapture: MediaStream }).testCapture
+        .getTracks()
+        .every((track) => track.readyState === "ended")
+    )
+  ).toBe(true);
+  await viewer.close();
+});
+
+test("WebSocket auth and roster work without ICE; one automatic restart and sanitized failure diagnostics", async ({
+  browser,
+  page: host
+}, testInfo) => {
+  const blockIce = async (page: Page) =>
+    page.addInitScript(() => {
+      const proto = RTCPeerConnection.prototype;
+      proto.addIceCandidate = async () => {};
+      const setRemote = proto.setRemoteDescription as (
+        this: RTCPeerConnection,
+        description: RTCSessionDescriptionInit
+      ) => Promise<void>;
+      proto.setRemoteDescription = function (description) {
+        return setRemote.call(this, {
+          ...description,
+          sdp: description.sdp?.replace(/^a=candidate:.*\r?\n/gm, "")
+        });
+      };
+      const createOffer = proto.createOffer as (
+        this: RTCPeerConnection,
+        options?: RTCOfferOptions
+      ) => Promise<RTCSessionDescriptionInit>;
+      Object.assign(window, { testRestarts: 0 });
+      proto.createOffer = function (
+        this: RTCPeerConnection,
+        options?: RTCOfferOptions
+      ) {
+        if (options?.iceRestart)
+          (window as unknown as { testRestarts: number }).testRestarts++;
+        return createOffer.call(this, options);
+      } as typeof proto.createOffer;
+    });
+  await blockIce(host);
+  const invitation = await hostStream(host);
+  const viewer = await browser.newPage();
+  await blockIce(viewer);
+  await connect(viewer, invitation);
+  await expect(
+    viewer.getByText("Joined as Alice", { exact: true })
+  ).toBeVisible();
+  await expect(viewer.locator(".viewer-list li")).toHaveCount(2);
+  await expect(host.locator(".viewer-list li")).toHaveCount(2);
+  expect(
+    await viewer
+      .locator("video")
+      .evaluate((video: HTMLVideoElement) => video.videoWidth)
+  ).toBe(0);
+  await host
+    .getByRole("tab", { name: "Advanced Diagnostics", exact: true })
+    .click();
+  await expect(host.getByRole("tabpanel")).toContainText(
+    /open · (local test WS|secure WSS)/
+  );
+  await host.evaluate(() => {
+    const pc = (window as unknown as { testPeers: RTCPeerConnection[] })
+      .testPeers[0];
+    pc.dispatchEvent(
+      Object.assign(new Event("icecandidateerror"), {
+        errorCode: 701,
+        address: "192.0.2.222",
+        errorText: "secret-proof-token",
+        url: "stun:2001:db8::123"
+      })
+    );
+    Object.defineProperty(pc, "iceConnectionState", {
+      configurable: true,
+      get: () => "failed"
+    });
+    pc.dispatchEvent(new Event("iceconnectionstatechange"));
+    pc.dispatchEvent(new Event("iceconnectionstatechange"));
+  });
+  await expect
+    .poll(() =>
+      host.evaluate(
+        () => (window as unknown as { testRestarts: number }).testRestarts
+      )
+    )
+    .toBe(1);
+  await expect(host.getByRole("tabpanel")).toContainText("may require TURN");
+  await expect(host.getByRole("tabpanel")).toContainText("1 / 1");
+  await host.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      configurable: true,
+      value: async (text: string) =>
+        Object.assign(window, { copiedDiagnostics: text })
+    });
+  });
+  await host.getByRole("button", { name: "Copy diagnostics" }).click();
+  const json = await host.evaluate(
+    () => (window as unknown as { copiedDiagnostics: string }).copiedDiagnostics
+  );
+  expect(JSON.parse(json).connections[0].iceErrors).toContain(701);
+  expect(JSON.parse(json).connections[0].iceRestartCount).toBe(1);
+  for (const forbidden of [
+    "192.0.2.222",
+    "2001:db8",
+    "secret-proof-token",
+    "a=ice-ufrag",
+    '"mac"',
+    '"proof"',
+    '"password"',
+    invitation
+  ])
+    expect(json).not.toContain(forbidden);
+  // The retry deadline closes only this media link; auth and roster survive.
+  await expect
+    .poll(
+      () =>
+        host.evaluate(
+          () =>
+            (window as unknown as { testPeers: RTCPeerConnection[] })
+              .testPeers[0].signalingState
+        ),
+      { timeout: 30_000 }
+    )
+    .toBe("closed");
+  await expect(host.getByRole("tabpanel")).toContainText("failed attempt");
+  await expect(host.locator(".viewer-list li")).toHaveCount(2);
+  expect(
+    await host.evaluate(
+      () => (window as unknown as { testRestarts: number }).testRestarts
+    )
+  ).toBe(1);
+  await host.setViewportSize({ width: 390, height: 960 });
+  expect(
+    await host.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth
+    )
+  ).toBe(true);
+  await host.screenshot({
+    path: testInfo.outputPath("diagnostics-failure-mobile.png"),
+    fullPage: true
+  });
+  await host.getByRole("button", { name: "End stream" }).click();
+  await viewer.close();
+});
+
+test("connected diagnostics contain selected pair and metrics; signaling loss closes media", async ({
+  browser,
+  page: host
+}, testInfo) => {
+  const invitation = await hostStream(host);
+  const viewer = await browser.newPage();
+  await connect(viewer, invitation);
+  await receiveAudioVideo(viewer);
+  await viewer
+    .getByRole("tab", { name: "Advanced Diagnostics", exact: true })
+    .click();
+  const panel = viewer.getByRole("tabpanel");
+  await expect(panel).toContainText("Direct P2P connected.");
+  await expect
+    .poll(() => panel.locator("dd").allTextContents())
+    .toContain("1920 × 1080");
+  await expect(
+    panel
+      .locator("div")
+      .filter({
+        has: viewer.locator("dt", { hasText: "Selected ICE candidate pair" })
+      })
+      .last()
+  ).toContainText("udp");
+  await expect(
+    panel
+      .locator("div")
+      .filter({ has: viewer.locator("dt", { hasText: "Video bitrate" }) })
+      .last()
+  ).toContainText("Mbps");
+  await viewer.screenshot({
+    path: testInfo.outputPath("diagnostics-connected-desktop.png"),
+    fullPage: true
+  });
+  await viewer.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      configurable: true,
+      value: async () => {
+        throw new Error("Permission denied");
+      }
+    });
+  });
+  await viewer.getByRole("button", { name: "Copy diagnostics" }).click();
+  const exported = JSON.parse(
+    await viewer.getByLabel("Sanitized diagnostics JSON").inputValue()
+  );
+  expect(exported.connections[0].selectedPair.local.address).toBe("[redacted]");
+  expect(exported.connections[0].metrics.videoBitrateMbps).toBeGreaterThan(0);
+  await viewer.evaluate(() =>
+    (window as unknown as { testSockets: WebSocket[] }).testSockets
+      .find((socket) => socket.url.includes("/peerjs?"))!
+      .close()
+  );
+  await expect(viewer.locator(".problem")).toContainText(
+    "WebSocket signaling disconnected"
+  );
+  expect(
+    await viewer.evaluate(() =>
+      (window as unknown as { testPeers: RTCPeerConnection[] }).testPeers.every(
+        (pc) => pc.connectionState === "closed"
+      )
+    )
+  ).toBe(true);
+  await expect(panel).toContainText("failed");
+  await host.getByRole("button", { name: "End stream" }).click();
+  await viewer.close();
+});
+
+test("a receiver requests one publisher ICE restart and real media recovers", async ({
+  browser,
+  page: host
+}) => {
+  const invitation = await hostStream(host);
+  const viewer = await browser.newPage();
+  await connect(viewer, invitation);
+  await receiveAudioVideo(viewer);
+  await host.evaluate(() => {
+    const pc = (window as unknown as { testPeers: RTCPeerConnection[] })
+      .testPeers[0];
+    const offer = pc.createOffer.bind(pc);
+    Object.assign(window, { testRestarts: 0 });
+    pc.createOffer = ((options?: RTCOfferOptions) => {
+      if (options?.iceRestart)
+        (window as unknown as { testRestarts: number }).testRestarts++;
+      return offer(options);
+    }) as typeof pc.createOffer;
+  });
+  const failReceiver = () =>
+    viewer.evaluate(() => {
+      const pc = (window as unknown as { testPeers: RTCPeerConnection[] })
+        .testPeers[0];
+      Object.defineProperty(pc, "iceConnectionState", {
+        configurable: true,
+        value: "failed"
+      });
+      pc.dispatchEvent(new Event("iceconnectionstatechange"));
+      Reflect.deleteProperty(pc, "iceConnectionState");
+    });
+  await failReceiver();
+  await expect
+    .poll(() =>
+      host.evaluate(
+        () => (window as unknown as { testRestarts: number }).testRestarts
+      )
+    )
+    .toBe(1);
+  await viewer.getByRole("tab", { name: "Advanced Diagnostics" }).click();
+  await expect(viewer.getByRole("tabpanel")).toContainText("1 / 1");
+  await expect(viewer.getByRole("tabpanel")).toContainText(
+    "Direct P2P connected."
+  );
+  await receiveAudioVideo(viewer);
+  await failReceiver();
+  await viewer.waitForTimeout(300);
+  expect(
+    await host.evaluate(
+      () => (window as unknown as { testRestarts: number }).testRestarts
+    )
+  ).toBe(1);
+  await host.getByRole("button", { name: "End stream" }).click();
+  await viewer.close();
 });
