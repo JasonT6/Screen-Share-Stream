@@ -5,7 +5,7 @@
 - Build for browsers; attendees need only an HTTPS invitation link and a password.
 - Let every participant stream screen/tab/window video and its audio directly to other attendees; allow everyone to select an active stream.
 - Respect the macOS private screen picker. Never auto-select sources, grant permissions, or add capture/consent bypass flags. The launcher prints a copyable link without opening or configuring browsers. Do not use or recommend special browser launch arguments, experimental settings, or separate profiles. Native macOS selection remains a requirement to verify in the normally launched browser; never claim it works from synthetic capture tests.
-- Require an audio track before going live. Never silently substitute microphone audio.
+- Allow sharing without audio and show a small notice explaining how to enable it in the screen share selector. Request source audio when supported; never substitute microphone audio.
 - Preserve available source resolution by default; allow publisher and viewer quality ceilings that reduce resolution, frame rate, and bitrate. Favor frame rate over resolution under pressure by default; allow publisher preferences and per-viewer overrides for detail, motion, or balanced priority, plus audio bitrate ceilings. Explain measured quality honestly. Connection attribution must be labeled as an estimate; insufficient evidence must remain unknown.
 - Automatically connect on a valid password. Require a session username; do not add accounts, approval, or a lobby.
 - Keep each media link one-way from its publisher; publishing is available to all authenticated participants. Do not request microphone/camera access on either side.

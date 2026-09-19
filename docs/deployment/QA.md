@@ -14,7 +14,7 @@ Use `BROWSER_EXECUTABLE` to point to an installed Chromium browser instead of in
 
 To verify the built artifact with the default public signaling service, run `npm run build`, then `TEST_STATIC_EXPORT=1 npm run verify:browser`. Set `BROWSER_EXECUTABLE` if needed. This mode requires internet access, uses `out/`, and starts only the local static preview process on port 3100. It still uses synthetic capture and does not replace a test between two physical devices on different networks.
 
-Unit tests verify room/password validation, challenge binding, wrong-password failures, signed SDP integrity, replay/reflection rejection, capture audio requirements, and STUN-only configuration. Browser tests replace only the screen picker with synthetic 1920×1080 frames and a tone, then check real WebRTC media transport, decoded resolution, audio RTP, and send/receive direction. They do not prove that a real OS capture picker supplies audio or that a speaker plays it.
+Unit tests verify room/password validation, challenge binding, wrong-password failures, signed SDP integrity, replay/reflection rejection, optional capture audio, and STUN-only configuration. Browser tests replace only the screen picker with synthetic 1920×1080 frames and a tone, then check real WebRTC media transport, decoded resolution, audio RTP, and send/receive direction. They do not prove that a real OS capture picker supplies audio or that a speaker plays it.
 
 ## Vercel landing page and invitations
 
@@ -49,7 +49,7 @@ Unit tests verify room/password validation, challenge binding, wrong-password fa
 - Enter a username and a one-character password: starting should succeed. Empty or whitespace-only names/passwords must be rejected.
 - Cancel the screen picker: a helpful error appears and no stream remains active.
 - Share a browser tab with audio enabled: live preview appears, is muted, and shows source dimensions.
-- Select a source without an audio track: sharing stops and the app explains how to enable audio.
+- Select a source without an audio track: video sharing starts and a small notice explains how to enable audio. Stop sharing and verify the notice disappears; restart with audio and verify it stays absent.
 - Test window/full-screen audio on each supported OS/browser; unsupported combinations must not claim success.
 - Test both 30 and 60 fps selections with source content in motion. Inspect delivered stats rather than assuming the requested frame rate.
 - Test a 1440p/4K source: verify actual received dimensions, readability, and motion at available bandwidth.

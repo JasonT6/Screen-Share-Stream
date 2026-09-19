@@ -1,5 +1,11 @@
 # Implementation status
 
+## Optional screen-share audio — 2026-09-18
+
+- Hosts and attendees can start sharing live video without an audio track. A small inline status notice explains that audio is not shared and can be enabled by stopping and selecting again with audio enabled. Share buttons now say “Share screen”.
+- Capture continues to request source audio, offers system audio where supported, and prefers window-only audio for windows. The browser owns the selector and its checkbox defaults; no consent bypass or microphone capture is added.
+- Validation: lint, type checking, all 23 unit tests, formatting, and the production static build passed. The build needed local-port permission and a fresh cache after a sandbox failure. All 16 Edge browser tests passed using synthetic capture and local signaling, including host video-only startup, attendee video-only remote playback, notice cleanup, audio RTP, authentication, and connection cleanup. Actual picker defaults, native capture permissions, and physical-device audio playback remain manual checks.
+
 Requirements reset on 2026-09-11: a static browser app for direct one-way video streaming with source audio, password invitations, and immediate connection. Historical LiveKit/account/approval milestones no longer apply.
 
 ## Native WebSocket signaling and Advanced Diagnostics — 2026-09-18

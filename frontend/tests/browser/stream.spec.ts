@@ -85,7 +85,7 @@ async function hostStream(page: Page) {
   await page.getByRole("link", { name: "Create a room" }).click();
   await page.getByLabel("Username", { exact: true }).fill("Host");
   await page.getByLabel("Stream password", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "Share screen & audio" }).click();
+  await page.getByRole("button", { name: "Share screen" }).click();
   await expect(page.getByLabel("Private invitation")).toBeVisible();
   const invitation = await page.getByLabel("Private invitation").inputValue();
   expect(new URL(invitation).origin).toBe(new URL(page.url()).origin);
@@ -216,7 +216,7 @@ test("password gates real native-resolution video and audio; multiple viewers, r
   await receiveAudioVideo(second);
   await expect(host.locator(".viewer-list li")).toHaveCount(3);
   await expect(
-    viewer.getByRole("button", { name: "Share screen & audio" })
+    viewer.getByRole("button", { name: "Share screen" })
   ).toHaveCount(1);
   await second.getByRole("button", { name: "Leave stream" }).click();
   await expect(host.locator(".viewer-list li")).toHaveCount(2);
@@ -239,7 +239,7 @@ test("password gates real native-resolution video and audio; multiple viewers, r
       )
     )
     .toBe(true);
-  await host.getByRole("button", { name: "Share screen & audio" }).click();
+  await host.getByRole("button", { name: "Share screen" }).click();
   await expect(host.getByLabel("Private invitation")).toBeVisible();
   expect(await host.getByLabel("Private invitation").inputValue()).not.toBe(
     invitation
@@ -250,7 +250,7 @@ test("password gates real native-resolution video and audio; multiple viewers, r
   await second.close();
 });
 
-test("missing audio releases the screen and prevents going live", async ({
+test("missing audio allows going live with a quiet notice", async ({
   page
 }) => {
   await prepare(page, false);
@@ -258,18 +258,20 @@ test("missing audio releases the screen and prevents going live", async ({
   await page.getByRole("link", { name: "Create a room" }).click();
   await page.getByLabel("Username", { exact: true }).fill("Host");
   await page.getByLabel("Stream password", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "Share screen & audio" }).click();
-  await expect(page.locator(".problem")).toContainText(
-    "No shared audio was captured"
+  await page.getByRole("button", { name: "Share screen" }).click();
+  await expect(page.getByTestId("audio-sharing-notice")).toContainText(
+    "Audio isn’t being shared"
   );
-  await expect(page.getByLabel("Private invitation")).toHaveCount(0);
+  await expect(page.getByLabel("Private invitation")).toBeVisible();
   expect(
     await page.evaluate(() =>
       (window as unknown as { testCapture: MediaStream }).testCapture
         .getTracks()
-        .every((track) => track.readyState === "ended")
+        .every((track) => track.readyState === "live")
     )
   ).toBe(true);
+  await page.getByRole("button", { name: "Stop sharing", exact: true }).click();
+  await expect(page.getByTestId("audio-sharing-notice")).toHaveCount(0);
 });
 
 test("invalid invitations and offline hosts have actionable errors", async ({
@@ -301,7 +303,7 @@ test("browser Stop sharing ends publication but keeps the session open", async (
     track.dispatchEvent(new Event("ended"));
   });
   await expect(
-    host.getByRole("button", { name: "Share screen & audio" })
+    host.getByRole("button", { name: "Share screen" })
   ).toBeVisible();
   await expect(
     viewer.getByRole("button", { name: "Not sharing: Host", exact: true })
@@ -368,7 +370,7 @@ test("canceling capture startup releases a late source and never opens an invita
   });
   await page.getByLabel("Username", { exact: true }).fill("Host");
   await page.getByLabel("Stream password", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "Share screen & audio" }).click();
+  await page.getByRole("button", { name: "Share screen" }).click();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect
     .poll(() =>
@@ -381,7 +383,7 @@ test("canceling capture startup releases a late source and never opens an invita
     .toBe(true);
   await expect(page.getByLabel("Private invitation")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Share screen & audio" })
+    page.getByRole("button", { name: "Share screen" })
   ).toBeEnabled();
 });
 
@@ -399,8 +401,8 @@ test("attendees publish simultaneously; everyone selects streams; stop, restart 
   await receiveAudioVideo(alice);
   await connect(bob, invitation, password, "Bob");
   await receiveAudioVideo(bob);
-  await alice.getByRole("button", { name: "Share screen & audio" }).click();
-  await bob.getByRole("button", { name: "Share screen & audio" }).click();
+  await alice.getByRole("button", { name: "Share screen" }).click();
+  await bob.getByRole("button", { name: "Share screen" }).click();
   for (const page of [host, alice, bob]) {
     await expect(page.locator(".viewer-list li")).toHaveCount(3);
     await expect(
@@ -465,7 +467,7 @@ test("attendees publish simultaneously; everyone selects streams; stop, restart 
     )
     .toBe(true);
   await receiveAudioVideo(bob, true); // Falls back to the host.
-  await alice.getByRole("button", { name: "Share screen & audio" }).click();
+  await alice.getByRole("button", { name: "Share screen" }).click();
   await host.getByRole("button", { name: "Watch Alice", exact: true }).click();
   await receiveAudioVideo(host, true);
   await alice
@@ -500,7 +502,7 @@ test("attendees publish simultaneously; everyone selects streams; stop, restart 
   await bob.close();
 });
 
-test("attendee capture failure and canceled startup preserve watching and release late tracks", async ({
+test("attendee video-only sharing and canceled startup preserve watching and release late tracks", async ({
   browser,
   page: host
 }) => {
@@ -512,10 +514,25 @@ test("attendee capture failure and canceled startup preserve watching and releas
   await viewer.getByLabel("Password", { exact: true }).fill(password);
   await viewer.getByRole("button", { name: "Connect to stream" }).click();
   await receiveAudioVideo(viewer);
-  await viewer.getByRole("button", { name: "Share screen & audio" }).click();
-  await expect(viewer.locator(".problem")).toContainText(
-    "No shared audio was captured"
-  );
+  await viewer.getByRole("button", { name: "Share screen" }).click();
+  await expect(viewer.getByTestId("audio-sharing-notice")).toBeVisible();
+  await expect(
+    host.getByRole("button", { name: "Watch Guest", exact: true })
+  ).toBeVisible();
+  await host.getByRole("button", { name: "Watch Guest", exact: true }).click();
+  await expect
+    .poll(() =>
+      host.locator("video").evaluate((video: HTMLVideoElement) => ({
+        width: video.videoWidth,
+        playing: video.currentTime > 0,
+        audioTracks: (video.srcObject as MediaStream).getAudioTracks().length
+      }))
+    )
+    .toEqual({ width: 1920, playing: true, audioTracks: 0 });
+  await viewer
+    .getByRole("button", { name: "Stop sharing", exact: true })
+    .click();
+  await expect(viewer.getByTestId("audio-sharing-notice")).toHaveCount(0);
   await receiveAudioVideo(viewer);
   await expect(
     host.getByRole("button", { name: "Not sharing: Guest", exact: true })
@@ -531,7 +548,7 @@ test("attendee capture failure and canceled startup preserve watching and releas
       return stream;
     };
   });
-  await viewer.getByRole("button", { name: "Share screen & audio" }).click();
+  await viewer.getByRole("button", { name: "Share screen" }).click();
   await viewer
     .getByRole("button", { name: "Cancel sharing", exact: true })
     .click();
@@ -599,7 +616,7 @@ test("quality changes affect real video per viewer and publisher; connection ind
     .selectOption("source");
   await receiveAudioVideo(alice);
   await receiveAudioVideo(bob);
-  await alice.getByRole("button", { name: "Share screen & audio" }).click();
+  await alice.getByRole("button", { name: "Share screen" }).click();
   await alice
     .getByLabel("Stream quality", { exact: true })
     .selectOption("480p");
@@ -702,9 +719,7 @@ test("advanced stream settings apply live per viewer, respect audio ceilings, an
   await expect(
     alice.getByRole("button", { name: "Not sharing: Host", exact: true })
   ).toBeDisabled();
-  await host
-    .getByRole("button", { name: "Share screen & audio", exact: true })
-    .click();
+  await host.getByRole("button", { name: "Share screen", exact: true }).click();
   await receiveAudioVideo(alice);
   await receiveAudioVideo(bob);
   await expect
@@ -718,7 +733,7 @@ test("advanced stream settings apply live per viewer, respect audio ceilings, an
   await alice.locator("#publish-quality-priority").selectOption("motion");
   await alice.locator("#publish-quality-audio").selectOption("standard");
   await alice
-    .getByRole("button", { name: "Share screen & audio", exact: true })
+    .getByRole("button", { name: "Share screen", exact: true })
     .click();
   await host.getByRole("button", { name: "Watch Alice", exact: true }).click();
   await receiveAudioVideo(host, true);

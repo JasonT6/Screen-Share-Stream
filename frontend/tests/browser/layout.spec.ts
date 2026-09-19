@@ -30,7 +30,7 @@ for (const width of [1440, 390]) {
       page.getByRole("heading", { name: "Start a stream", exact: true })
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Share screen & audio" })
+      page.getByRole("button", { name: "Share screen" })
     ).toBeVisible();
     expect(
       await page.evaluate(

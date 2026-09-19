@@ -34,7 +34,7 @@ There are no dynamic server routes. Invitations contain a room identifier only; 
 ## Connection and authentication
 
 1. The host chooses a username and any nonblank password and invokes `getDisplayMedia` directly from a user gesture.
-2. Require both live video and audio tracks; stop all tracks and explain a missing-audio failure.
+2. Require live video; audio is optional. Show a quiet notice to the publisher when no live audio track is present. Stop all tracks if video capture fails.
 3. Generate a 256-bit random host peer ID with Web Crypto. Current clients also accept legacy 128-bit room invitations. Derive a non-exportable HMAC-SHA256 key from the password using PBKDF2-SHA256, 210,000 iterations, and a versioned room-specific salt.
 4. Register the ephemeral host ID over secure WebSocket with PeerServer. Only then display the invitation. `lib/signaling.ts` isolates the service adapter: `/peerjs?key=peerjs&id=…&token=…`, server `OPEN`, transport `HEARTBEAT`, and opaque application payloads inside the server’s forwarded `CANDIDATE` envelope. This wire envelope is just WebSocket JSON routing; it does not negotiate ICE or allocate a data channel. The random registration token is independent of the password and never exported in diagnostics.
 5. The attendee enters a username and password. Their browser creates its own ephemeral ID and connects to the same WebSocket service. Authentication and rosters work even when direct ICE connectivity is impossible.

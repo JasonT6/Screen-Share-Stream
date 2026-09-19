@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { captureDisplay, rtcConfiguration } from "../lib/media";
 
-test("capture requests native dimensions and shared audio, and rejects a silent source", async () => {
+test("capture requests native dimensions and shared audio, and accepts a silent source", async () => {
   const calls: DisplayMediaStreamOptions[] = [];
   let stopped = false;
   const video = {
@@ -27,8 +27,9 @@ test("capture requests native dimensions and shared audio, and rejects a silent 
       }
     }
   });
-  await assert.rejects(captureDisplay(60), /No shared audio/);
-  assert.equal(stopped, true);
+  const silent = await captureDisplay(60);
+  assert.equal(silent.getAudioTracks().length, 0);
+  assert.equal(stopped, false);
   includeAudio = true;
   await captureDisplay(30);
   assert.deepEqual(calls[0].video, { frameRate: { ideal: 60, max: 60 } });
@@ -43,6 +44,14 @@ test("capture requests native dimensions and shared audio, and rejects a silent 
   );
   assert.equal(video.contentHint, "detail");
   assert.equal(audio.contentHint, "music");
+  assert.equal(
+    (calls[0] as DisplayMediaStreamOptions & { systemAudio: string })
+      .systemAudio,
+    "include"
+  );
+  video.readyState = "ended";
+  await assert.rejects(captureDisplay(60), /No live screen video/);
+  assert.equal(stopped, true);
   for (const server of rtcConfiguration.iceServers ?? []) {
     for (const url of [server.urls].flat())
       assert.ok(url.startsWith("stun:"), "Media must never use TURN");

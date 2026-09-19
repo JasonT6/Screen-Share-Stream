@@ -10,7 +10,7 @@ Deploy once, then everyone opens the website. Hosts and attendees do not need No
 2. Select **Other** as the framework preset and Node.js **22.x** or newer. The included `frontend/vercel.json` sets `npm ci`, `npm run build`, and the static output directory `out`, plus the browser security headers. No environment variables are required.
 3. Deploy, then open the production HTTPS address. Use the production domain for invitations; attendees must be able to access it without a Vercel login.
 
-The landing page’s **Create a room** button opens host setup. Choose a username and password, click **Share screen & audio**, and enable source audio in the browser picker. Copy the invitation inside the app and share the password separately. Attendees open that invitation and enter their username and password to connect.
+The landing page’s **Create a room** button opens host setup. Choose a username and password, click **Share screen**, and enable source audio in the browser picker. Copy the invitation inside the app and share the password separately. Attendees open that invitation and enter their username and password to connect.
 
 Every new room gets a cryptographically random 256-bit ID. Invitations look like `https://your-site.vercel.app/#room=ps-<64 random hex characters>` and never contain the password. The website stays available independently of your computer; keep the host tab open and computer awake for the room itself to stay active. Ending a session invalidates its invitation.
 
@@ -30,7 +30,7 @@ You can also double-click `run.command` in Finder. Requires Node.js 22+. For hos
 
 The launcher installs project dependencies on first use or when the dependency lock changes, builds when app/configuration changes, downloads a pinned official Cloudflare helper once if needed, starts its own static file server on a free local port, verifies a temporary public HTTPS address, and prints a host link for you to copy into your existing browser. It never opens, closes, or configures a browser. Repeat the same command for your next session; the public address changes each time.
 
-Open the newly printed host link, click **Create a room**, choose a username and password, click **Share screen & audio**, select your source and enable its audio, then send attendees the **invitation copied inside the app** and the password. Leave the terminal running and the host tab open. **Ctrl+C** stops the tunnel and static file server without touching your browser. Closing the host tab ends its stream but does not stop the launcher. While running on macOS, the launcher prevents idle sleep. It checks the public page every 15 seconds and reports sustained failures and recovery in the terminal.
+Open the newly printed host link, click **Create a room**, choose a username and password, click **Share screen**, select your source and enable its audio, then send attendees the **invitation copied inside the app** and the password. Leave the terminal running and the host tab open. **Ctrl+C** stops the tunnel and static file server without touching your browser. Closing the host tab ends its stream but does not stop the launcher. While running on macOS, the launcher prevents idle sleep. It checks the public page every 15 seconds and reports sustained failures and recovery in the terminal.
 
 The [Cloudflare Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/) serves only the static webpage; audio and video remain peer to peer. This is a convenient temporary address, not permanent website hosting or guaranteed availability.
 
@@ -68,7 +68,7 @@ The native macOS picker remains an acceptance requirement, not a verified capabi
 
 [Cisco documents a native picker option for the Webex Mac app](https://help.webex.com/en-us/article/jgczxu). That alone does not establish how a Webex call in an Edge tab selects its picker. Compare the same browser and capture type when diagnosing differences. Do not add a native helper, extension, or desktop host to this web-only project without an explicitly agreed scope change.
 
-If macOS asks to bypass the private picker, cancel. A browser-owned source chooser alone does not prove that bypass access was granted. Shared audio can require separate permission and must be present before streaming starts. Actual picker behavior and source audio must be checked interactively; synthetic media tests cannot verify them.
+If macOS asks to bypass the private picker, cancel. A browser-owned source chooser alone does not prove that bypass access was granted. Shared audio can require separate permission and is optional. Actual picker behavior and source audio must be checked interactively; synthetic media tests cannot verify them.
 
 ## Development / local preview
 
@@ -80,7 +80,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000` in desktop Chrome or Edge. Click **Create a room**, then choose a username and any nonblank password (short passwords are accepted), then **Share screen & audio**. In the browser picker, select a tab and enable **Share tab audio**. Screen/window audio depends on browser and operating-system support. Capture is rejected if no audio track is present.
+Open `http://localhost:3000` in desktop Chrome or Edge. Click **Create a room**, then choose a username and any nonblank password (short passwords are accepted), then **Share screen**. In the browser picker, select a tab and enable **Share tab audio**. Screen/window audio depends on browser and operating-system support. Sharing without audio is allowed, with a small notice explaining how to enable it. Audio is requested by default, including system audio where supported, but the browser controls its picker checkbox; the app cannot force it on.
 
 After the connection service is ready, copy the invitation and share the password separately. Test with another browser window. Keep the host tab open and the computer awake. **Stop sharing** (including the browser’s button) stops only your publication and keeps the session open. You can share again using the same invitation. **End stream** or closing the host tab ends the session for everyone. A new session creates a new invitation; old invitations do not follow the new session.
 

@@ -642,13 +642,10 @@ export abstract class RoomSession {
       source.getTracks().forEach((track) => track.stop());
       throw new Error("The session has ended.");
     }
-    if (
-      !source.getVideoTracks().some((track) => track.readyState === "live") ||
-      !source.getAudioTracks().some((track) => track.readyState === "live")
-    ) {
+    if (!source.getVideoTracks().some((track) => track.readyState === "live")) {
       source.getTracks().forEach((track) => track.stop());
       throw new Error(
-        "Screen or shared audio stopped. Share again with audio enabled."
+        "Screen sharing stopped. Choose a screen to share again."
       );
     }
     if (this.source) await this.stopSharing();

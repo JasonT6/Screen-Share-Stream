@@ -33,7 +33,7 @@ export async function captureDisplay(
       noiseSuppression: false,
       autoGainControl: false
     },
-    systemAudio: "exclude",
+    systemAudio: "include",
     windowAudio: "window",
     // Source changes require a fresh user-initiated picker, not a tab-switch
     // shortcut. The browser, not this webpage or launcher, owns native UI.
@@ -42,19 +42,14 @@ export async function captureDisplay(
   const stream = await navigator.mediaDevices.getDisplayMedia(options);
   const video = stream.getVideoTracks()[0];
   const audio = stream.getAudioTracks()[0];
-  if (
-    !video ||
-    !audio ||
-    video.readyState !== "live" ||
-    audio.readyState !== "live"
-  ) {
+  if (!video || video.readyState !== "live") {
     stream.getTracks().forEach((track) => track.stop());
     throw new Error(
-      "No shared audio was captured. Share a browser tab and enable ‘Share tab audio’. For a screen or window, your browser and operating system must support sharing its audio."
+      "No live screen video was captured. Choose a tab, window, or screen to share."
     );
   }
   video.contentHint = "detail";
-  audio.contentHint = "music";
+  if (audio) audio.contentHint = "music";
   return stream;
 }
 

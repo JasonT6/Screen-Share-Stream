@@ -790,7 +790,7 @@ function Session({ roomId }: { roomId: string | null }) {
               <p className="muted">
                 {roomId
                   ? "Enter your username and the password from your host."
-                  : "Choose a username and password, then share a screen with audio."}
+                  : "Choose a username and password, then share a screen."}
               </p>
               <div className="field">
                 <label htmlFor="username">Username</label>
@@ -844,7 +844,7 @@ function Session({ roomId }: { roomId: string | null }) {
                 <div className="audio-tip">
                   <Headphones size={19} />
                   <p>
-                    <strong>Remember to share audio.</strong>Share a browser tab
+                    <strong>Want to include audio?</strong>Share a browser tab
                     and enable “Share tab audio”.
                   </p>
                 </div>
@@ -858,7 +858,7 @@ function Session({ roomId }: { roomId: string | null }) {
                     ? error
                       ? "Try again"
                       : "Connect to stream"
-                    : "Share screen & audio"}
+                    : "Share screen"}
               </button>
               {busy && (
                 <button
@@ -970,6 +970,19 @@ function Session({ roomId }: { roomId: string | null }) {
                 <NetworkStatus label="Your upload" status={ownHealth} />
               )}
               <Problem>{notice}</Problem>
+              {ownStream &&
+                !ownStream
+                  .getAudioTracks()
+                  .some((track) => track.readyState === "live") && (
+                  <p
+                    className="field-help"
+                    role="status"
+                    data-testid="audio-sharing-notice"
+                  >
+                    Audio isn’t being shared. To include it, stop sharing and
+                    enable audio in the screen share selector, if available.
+                  </p>
+                )}
               {ownStream ? (
                 <button
                   className="button full secondary"
@@ -989,7 +1002,7 @@ function Session({ roomId }: { roomId: string | null }) {
                     onClick={share}
                   >
                     <ScreenShare size={18} />
-                    {sharingBusy ? "Starting…" : "Share screen & audio"}
+                    {sharingBusy ? "Starting…" : "Share screen"}
                   </button>
                   {sharingBusy && (
                     <button
@@ -1003,7 +1016,7 @@ function Session({ roomId }: { roomId: string | null }) {
                     </button>
                   )}
                   <p className="field-help">
-                    Share a tab, window, or screen with source audio.
+                    Share a tab, window, or screen. Audio is optional.
                   </p>
                 </>
               )}
