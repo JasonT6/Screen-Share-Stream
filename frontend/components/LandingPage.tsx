@@ -3,6 +3,8 @@ import {
   Headphones,
   LockKeyhole,
   MonitorPlay,
+  Volume2,
+  Maximize2,
   Users
 } from "lucide-react";
 
@@ -11,11 +13,13 @@ export default function LandingPage() {
     <div className="landing">
       <section className="landing-hero" aria-labelledby="landing-title">
         <div className="landing-copy">
-          <p className="eyebrow">YOUR PEOPLE. YOUR SCREENS.</p>
+          <p className="eyebrow">
+            <span className="dot" /> YOUR PEOPLE. YOUR SCREENS.
+          </p>
           <h1 id="landing-title">
             A screen worth
             <br />
-            sharing.
+            <span>sharing.</span>
           </h1>
           <p className="landing-intro">
             Bring your people together with screen sharing and sound. Create a
@@ -30,19 +34,32 @@ export default function LandingPage() {
         </div>
         <div className="landing-preview" aria-hidden="true">
           <div className="landing-preview-bar">
-            <span className="landing-window-dots">
-              <i />
-              <i />
-              <i />
+            <span className="preview-room">
+              <span className="dot" /> Your private room
             </span>
-            <span>Your own little screening room</span>
-            <LockKeyhole size={15} />
+            <span className="preview-secure">
+              <LockKeyhole size={13} /> INVITE ONLY
+            </span>
           </div>
           <div className="landing-preview-screen">
             <div className="landing-orbit">
               <MonitorPlay size={64} strokeWidth={1.25} />
             </div>
-            <span>Good things are better shared.</span>
+            <div className="preview-message">
+              <span className="small-label">A LITTLE CLOSER</span>
+              <p>
+                Good things are
+                <br />
+                better shared.
+              </p>
+            </div>
+            <div className="preview-controls">
+              <Volume2 size={15} />
+              <span className="preview-track">
+                <i />
+              </span>
+              <Maximize2 size={14} />
+            </div>
           </div>
           <div className="landing-preview-bottom">
             <span>
@@ -56,7 +73,10 @@ export default function LandingPage() {
       </section>
       <section className="landing-steps" aria-label="How it works">
         <article>
-          <span className="landing-step">01</span>
+          <div className="step-top">
+            <span className="landing-step">01</span>
+            <MonitorPlay size={20} strokeWidth={1.5} />
+          </div>
           <h2>Make it yours.</h2>
           <p>
             Pick a username and room password. Share a screen or tab with its
@@ -64,7 +84,10 @@ export default function LandingPage() {
           </p>
         </article>
         <article>
-          <span className="landing-step">02</span>
+          <div className="step-top">
+            <span className="landing-step">02</span>
+            <LockKeyhole size={20} strokeWidth={1.5} />
+          </div>
           <h2>Send an invitation.</h2>
           <p>
             Copy your unique room link and share the password separately with
@@ -72,7 +95,10 @@ export default function LandingPage() {
           </p>
         </article>
         <article>
-          <span className="landing-step">03</span>
+          <div className="step-top">
+            <span className="landing-step">03</span>
+            <Users size={20} strokeWidth={1.5} />
+          </div>
           <h2>Share the moment.</h2>
           <p>
             Everyone can share a screen. Choose whose stream to watch, with

@@ -63,6 +63,7 @@ import {
   type ConnectionStatus
 } from "@/lib/connection-quality";
 import LandingPage from "@/components/LandingPage";
+import ThemeToggle from "@/components/ThemeToggle";
 
 import AdvancedDiagnostics from "./AdvancedDiagnostics";
 import { emptyDiagnostics } from "@/lib/diagnostics";
@@ -1067,7 +1068,12 @@ export default function StreamApp() {
           private<span>stream</span>
           <span className="beta-tag">P2P</span>
         </a>
-        <span className="header-note">A little closer, wherever you are.</span>
+        <div className="header-actions">
+          <span className="header-note">
+            A little closer, wherever you are.
+          </span>
+          <ThemeToggle />
+        </div>
       </header>
       <main>
         {room === null ? (
