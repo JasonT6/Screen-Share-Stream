@@ -8,7 +8,8 @@ import {
   useEffect,
   useRef,
   useState,
-  type FormEvent
+  type FormEvent,
+  type ReactNode
 } from "react";
 import {
   ArrowLeft,
@@ -75,8 +76,10 @@ function QualitySelector({
   onChange,
   disabled,
   preferences,
-  onPreferences
+  onPreferences,
+  children
 }: {
+  children?: ReactNode;
   preferences: StreamPreferences;
   onPreferences: (value: StreamPreferences) => void;
   id: string;
@@ -88,7 +91,14 @@ function QualitySelector({
   return (
     <>
       <div className="field quality-selector">
-        <label htmlFor={id}>{label}</label>
+        {children ? (
+          <>
+            <span>{label}</span>
+            <label htmlFor={id}>Resolution</label>
+          </>
+        ) : (
+          <label htmlFor={id}>{label}</label>
+        )}
         <select
           id={id}
           value={value}
@@ -102,6 +112,7 @@ function QualitySelector({
           ))}
         </select>
       </div>
+      {children}
       <details className="advanced-settings">
         <summary>
           Advanced {id === "playback-quality" ? "playback" : "stream"} settings
@@ -823,23 +834,22 @@ function Session({ roomId }: { roomId: string | null }) {
                     changePublishQuality(publishQuality, value)
                   }
                   disabled={busy}
-                />
-              )}
-              {!roomId && (
-                <div className="field">
-                  <label htmlFor="frame-rate">Motion quality</label>
-                  <select
-                    id="frame-rate"
-                    value={frameRate}
-                    disabled={busy}
-                    onChange={(event) =>
-                      setFrameRate(Number(event.target.value) as FrameRate)
-                    }
-                  >
-                    <option value={60}>Source resolution · 60 fps</option>
-                    <option value={30}>Source resolution · 30 fps</option>
-                  </select>
-                </div>
+                >
+                  <div className="field">
+                    <label htmlFor="frame-rate">Frame Rate</label>
+                    <select
+                      id="frame-rate"
+                      value={frameRate}
+                      disabled={busy}
+                      onChange={(event) =>
+                        setFrameRate(Number(event.target.value) as FrameRate)
+                      }
+                    >
+                      <option value={60}>60 fps</option>
+                      <option value={30}>30 fps</option>
+                    </select>
+                  </div>
+                </QualitySelector>
               )}
               {!roomId && (
                 <div className="audio-tip">

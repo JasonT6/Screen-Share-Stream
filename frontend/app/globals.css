@@ -784,8 +784,12 @@ footer {
   border-top: 1px solid var(--line);
 }
 .quality-selector {
-  margin-top: 18px;
+  margin-top: 24px;
   margin-bottom: 12px;
+}
+.quality-selector > span {
+  display: block;
+  margin-bottom: 9px;
 }
 .network-row {
   display: grid;
@@ -853,16 +857,18 @@ footer {
 
 .advanced-settings {
   margin: 14px 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px;
   min-width: 0;
 }
 .advanced-settings summary {
+  width: fit-content;
   cursor: pointer;
   color: var(--text);
   font-size: 12px;
   line-height: 1.5;
+}
+.advanced-settings summary:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .advanced-settings summary:focus-visible {
   outline: 2px solid var(--accent);
@@ -872,6 +878,26 @@ footer {
 .advanced-settings select {
   min-width: 0;
   max-width: 100%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  @supports (interpolate-size: allow-keywords) {
+    .advanced-settings {
+      interpolate-size: allow-keywords;
+    }
+    .advanced-settings::details-content {
+      height: 0;
+      opacity: 0;
+      overflow: clip;
+      transition:
+        height 240ms ease,
+        opacity 240ms ease,
+        content-visibility 240ms allow-discrete;
+    }
+    .advanced-settings[open]::details-content {
+      height: auto;
+      opacity: 1;
+    }
+  }
 }
 
 .landing {
@@ -1404,8 +1430,7 @@ select {
   box-shadow: var(--raised);
 }
 .status-pill,
-.network-status,
-.advanced-settings {
+.network-status {
   background: var(--recess);
   box-shadow: var(--inset);
 }
