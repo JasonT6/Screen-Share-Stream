@@ -90,7 +90,7 @@ test("theme toggles with the keyboard, persists, and preserves room setup", asyn
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("body")).toHaveCSS(
     "background-color",
-    "rgb(0, 0, 0)"
+    "rgb(48, 48, 48)"
   );
   await expect(page.getByLabel("Username", { exact: true })).toHaveValue(
     "Taylor"
@@ -102,7 +102,7 @@ test("theme toggles with the keyboard, persists, and preserves room setup", asyn
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("body")).toHaveCSS(
     "background-color",
-    "rgb(0, 0, 0)"
+    "rgb(48, 48, 48)"
   );
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
@@ -130,7 +130,7 @@ test("theme remains usable when browser storage is blocked", async ({
   await toggle.click();
   await expect(page.locator("body")).toHaveCSS(
     "background-color",
-    "rgb(0, 0, 0)"
+    "rgb(48, 48, 48)"
   );
   await toggle.click();
   await expect(page.locator("body")).toHaveCSS(
