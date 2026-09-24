@@ -137,6 +137,12 @@ The host browser checks a fresh challenge-response before creating any media sen
 
 Share a strong, unique password separately from the invitation. This is shared-password access, not individual identity: anyone with both can watch or forward them. It is not a PAKE; captured authentication transcripts permit offline password guessing, so a longer unpredictable phrase or the optional generator offers stronger protection; length and complexity are not enforced. Peers learn each other's connection addresses. Usernames are session display names, not verified identities, and duplicates are allowed. End the session and create a new one to replace access credentials.
 
+## Source organization
+
+The Next.js entry points and global styles live in `frontend/app/`. `components/StreamApp.tsx` owns the page shell and fragment navigation; `components/stream/` contains the session hook and focused setup, playback, sharing, participant, and diagnostics components. `lib/session/` separates host/viewer authentication, shared room lifecycle, signed transport, and WebRTC media links. Protocol validation, capture/quality policy, signaling, and diagnostic calculations remain in `lib/`.
+
+Workspace, landing, diagnostics, and theme styles live in `app/styles/` and are imported in order by the root layout. Launcher scripts, deployment configuration, and test commands retain their existing entry points. See the [architecture source map](docs/ARCHITECTURE.md#source-map) for details. Optional public build-time settings are documented in `frontend/.env.example`; no environment file is required.
+
 ## Checks
 
 ```sh

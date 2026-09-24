@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+// Keep feature styles and theme overrides in their original cascade order.
+import "./styles/workspace.css";
+import "./styles/landing.css";
+import "./styles/diagnostics.css";
+import "./styles/theme.css";
 
 export const metadata: Metadata = {
   title: "Private Stream",

@@ -101,15 +101,23 @@ Async startup uses cancellation generations so a canceled/unmounted screen canno
 
 ## Source map
 
-- `frontend/components/StreamApp.tsx`: host/viewer flow, player, stats, cancellation.
-- `frontend/lib/stream-session.ts`: authenticated logical channels, media negotiation, presence, lifecycle.
+- `frontend/components/StreamApp.tsx`: application shell and fragment navigation; changing rooms unmounts the current session.
+- `frontend/components/stream/useStreamSession.ts`: session state, capture gestures, startup/cancellation, measurements, quality updates, invitation copying, and cleanup.
+- `frontend/components/stream/`: session composition, entry form, active controls, participant list, player/stats, quality settings, connection indicators, and diagnostics. Components preserve the same DOM and delegate lifecycle work to the session hook.
+- `frontend/lib/session/host-session.ts` and `viewer-session.ts`: password authentication, membership, and host/viewer signaling behavior.
+- `frontend/lib/session/room-session.ts`: shared publication lifecycle, media routing, roster reconciliation, measurements, and cleanup.
+- `frontend/lib/session/media-link.ts`: one-way WebRTC negotiation, ICE recovery, sender tuning, and per-link diagnostics.
+- `frontend/lib/session/transport.ts`: session signaling registration, ordered signed messages, and presence heartbeats. Shared timeout and failure text live in `constants.ts`.
 - `frontend/lib/signaling.ts`: native secure WebSocket PeerServer adapter, registration, validation and buffer limits.
-- `frontend/lib/diagnostics.ts` and `frontend/components/AdvancedDiagnostics.tsx`: allowlisted snapshots/export and diagnostics UI.
+- `frontend/lib/diagnostics.ts` and `frontend/components/stream/AdvancedDiagnostics.tsx`: allowlisted snapshots/export and diagnostics UI.
 - `frontend/lib/protocol.ts`: validation, key derivation, proofs, signed envelopes.
 - `frontend/lib/media.ts`: capture policy, STUN configuration, quality presets, sender controls, interval stats.
 - `frontend/lib/connection-quality.ts`: upload summaries and conservative connection attribution.
+- `frontend/app/globals.css`: global tokens, reset, and shell primitives. `frontend/app/styles/` holds workspace, landing, diagnostics, and theme styles, imported once in `layout.tsx` in cascade order.
 - `frontend/tests/`: protocol tests and real browser media tests.
 - `frontend/scripts/serve.mjs`: reusable static-file server and local preview command.
 - `frontend/scripts/share.mjs`: regular-use launcher, build cache, tunnel, and lifecycle.
 - `frontend/scripts/tunnel-health.mjs`: public page readiness and outage/recovery monitoring.
 - `run.command`: executable entry point for Terminal or Finder.
+
+Public build-time settings remain documented in `frontend/.env.example`. TypeScript incremental metadata is generated under the ignored `.next/cache/` directory rather than tracked as source. The launcher fingerprints `app`, `components`, and `lib` recursively, including the extracted modules and styles.

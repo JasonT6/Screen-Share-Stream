@@ -34,7 +34,7 @@ export const unknownStatus = (label = "Measuring…"): ConnectionStatus => ({
     "Waiting for recent stream measurements. This is not an internet speed test."
 });
 
-export function networkTrouble(stats: StreamStats): boolean {
+function networkTrouble(stats: StreamStats): boolean {
   return (
     stats.state === "failed" ||
     stats.state === "disconnected" ||

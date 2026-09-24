@@ -1,0 +1,64 @@
+.diagnostics {
+  margin-top: 28px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  min-width: 0;
+}
+.diagnostics-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.diagnostics-tabs button {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.diagnostics-tabs button[aria-selected="true"] {
+  background: var(--recess);
+  color: var(--accent-text);
+}
+.diagnostics-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.diagnostics p {
+  line-height: 1.5;
+}
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr));
+  gap: 16px;
+  margin: 20px 0 0;
+}
+.diagnostics-grid dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+.diagnostics-grid dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.diagnostics-link {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  margin-top: 24px;
+}
+.diagnostics-link h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.diagnostics textarea {
+  width: 100%;
+  font-family: monospace;
+}

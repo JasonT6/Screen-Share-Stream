@@ -1,5 +1,14 @@
 # Implementation status
 
+## Behavior-preserving organization cleanup — 2026-09-23
+
+- Split the application shell from the session lifecycle hook and focused setup, playback, participant, sharing, quality, and diagnostics components. Split the session engine into host/viewer authentication, shared room lifecycle, signed transport, and one-way media link modules. Capture gestures, cancellation generations, authentication, message ordering, recovery limits, and cleanup retain their existing behavior.
+- Organized global styling into base, workspace, landing, diagnostics, and theme files while preserving cascade order. Removed seven unreferenced CSS rules, unused Tailwind theme extensions, ignored media-status callback work, unused exported access, the redundant root environment example, and the empty `frontend/types/` directory. Removed tracked TypeScript build metadata and placed future incremental caches under ignored `.next/cache/`.
+- Updated the README and architecture source map. Dependencies, invitation compatibility, protocol formats, public signaling defaults, capture policy, launcher commands, and deployment entry points are unchanged.
+- Validation: the original baseline passed lint, type checking, all 23 unit tests, formatting, and all 20 Edge browser tests. The refactored source passed the same checks, stricter unused-local/parameter checking, launcher help/syntax checks, and the production static build. Browser/build validation ran in isolated copies to avoid the existing development-server lock; the final copy was verified against the workspace source and configuration.
+- Production comparison: all 20 combinations of landing, host setup, advanced settings, invitation, and invalid invitation at 1440px/390px in light/dark mode matched the original DOM, computed styles, and settled screenshot pixels exactly. Compiled CSS matches the original after removing the seven unused rules. No component or library modules are left without consumers.
+- Browser tests use synthetic screen video/audio and local signaling with real WebRTC. Actual OS screen selection, physical-device audio, public-service connectivity, and cross-network delivery were not retested. No deployment was performed.
+
 ## Optional screen-share audio — 2026-09-18
 
 - Hosts and attendees can start sharing live video without an audio track. A small inline status notice explains that audio is not shared and can be enabled by stopping and selecting again with audio enabled. Share buttons now say “Share screen”.
